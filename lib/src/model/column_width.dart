@@ -39,6 +39,15 @@ sealed class FitGridColumnWidth {
   /// Upper clamp in logical pixels, applied after measurement.
   final double? max;
 
+  /// Whether this policy pins the column to a single width, leaving a resize
+  /// drag nothing to do.
+  ///
+  /// A [FitGridFixedWidth] is the obvious case, but `auto(min: 120, max: 120)`
+  /// is the same thing said differently, and the header checks this rather than
+  /// the runtime type so both are treated alike: no handle is offered for a
+  /// column that could not move if it were dragged.
+  bool get isPinned => min != null && max != null && min == max;
+
   /// Applies this policy's clamp to a measured or computed [width].
   double clamp(double width) {
     var result = width;

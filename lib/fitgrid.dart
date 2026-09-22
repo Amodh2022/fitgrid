@@ -15,6 +15,8 @@ export 'src/controller/fitgrid_controller.dart'
         FitGridController,
         FitGridDataState,
         FitGridSelectionState;
+export 'src/controller/fitgrid_editing.dart' show FitGridEditingState;
+export 'src/controller/fitgrid_pagination.dart' show FitGridPaginationState;
 export 'src/model/column_width.dart'
     show
         FitGridAutoWidth,
@@ -29,10 +31,22 @@ export 'src/model/enums.dart'
         FitGridFreeze,
         FitGridOverflow,
         FitGridSortDirection;
+export 'src/model/fitgrid_editor.dart'
+    show
+        FitGridCellCommit,
+        FitGridCellValidator,
+        FitGridEditTrigger,
+        FitGridEditor,
+        FitGridEditorBuilder,
+        FitGridEditorSession;
+export 'src/model/page_view.dart' show FitGridPageView;
 export 'src/model/fitgrid_column.dart'
     show FitGridCellBuilder, FitGridCellStyle, FitGridCellValue, FitGridColumn;
 export 'src/model/row_height.dart'
     show FitGridContentRowHeight, FitGridFixedRowHeight, FitGridRowHeight;
 export 'src/sizing/column_layout.dart' show FitGridColumnLayout;
+export 'src/sizing/row_metrics.dart'
+    show FitGridMeasuredRowMetrics, FitGridRowMetrics, FitGridUniformRowMetrics;
 export 'src/theme/fitgrid_theme.dart' show FitGridTheme, FitGridThemeData;
 export 'src/widgets/fitgrid.dart' show FitGrid;
+export 'src/widgets/fitgrid_pager.dart' show FitGridPageLabel, FitGridPager;

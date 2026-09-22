@@ -249,7 +249,9 @@ void main() {
     final section = fitGridSection(tester);
     final topLeft = tester.getTopLeft(find.byType(FitGridSection));
     // Third row down, comfortably inside it.
-    await tester.tapAt(topLeft + Offset(20, section.rowHeight * 2.5));
+    await tester.tapAt(
+      topLeft + Offset(20, section.rowOffsetAt(2) + section.rowHeightAt(2) / 2),
+    );
     await tester.pump();
 
     expect(taps, [2]);

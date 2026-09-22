@@ -27,10 +27,21 @@ class FitGridThemeData {
     required this.focusOutline,
     required this.sortIconColor,
     required this.placeholderForeground,
+    required this.tooltipBackground,
+    required this.tooltipForeground,
     this.density = FitGridDensity.standard,
     this.dividerThickness = 1.0,
     this.borderRadius = const BorderRadius.all(Radius.circular(12)),
     this.resizeHandleWidth = 8.0,
+    this.resizeTouchTargetWidth = 32.0,
+    this.minColumnWidth = 24.0,
+    this.fadeExtent = 28.0,
+    this.tooltipMaxWidth = 360.0,
+    this.tooltipBorderRadius = const BorderRadius.all(Radius.circular(6)),
+    this.sortAscendingIcon = Icons.arrow_upward_rounded,
+    this.sortDescendingIcon = Icons.arrow_downward_rounded,
+    this.sortUnsortedIcon = Icons.unfold_more_rounded,
+    this.resizeGripIcon = Icons.drag_indicator,
     this.sortIconSize = 18.0,
     this.headerPadding,
     this.cellPadding,
@@ -88,6 +99,8 @@ class FitGridThemeData {
       focusOutline: scheme.primary,
       sortIconColor: scheme.onSurfaceVariant,
       placeholderForeground: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+      tooltipBackground: scheme.inverseSurface,
+      tooltipForeground: scheme.onInverseSurface,
       density: density,
     );
   }
@@ -115,14 +128,55 @@ class FitGridThemeData {
   /// Foreground for the empty state and loading placeholders.
   final Color placeholderForeground;
 
+  /// Background of the label shown over a cell whose text was truncated. See
+  /// [FitGridOverflow.tooltipOnTruncate].
+  final Color tooltipBackground;
+
+  /// Text colour of that label.
+  final Color tooltipForeground;
+
   /// Vertical rhythm. Drives the defaults for padding and row height.
   final FitGridDensity density;
 
   final double dividerThickness;
   final BorderRadius borderRadius;
 
-  /// Hit width of the draggable region straddling a column divider.
+  /// Visual width of the grip drawn on a column divider.
   final double resizeHandleWidth;
+
+  /// Hit width of the draggable region straddling a column divider.
+  ///
+  /// Deliberately much wider than [resizeHandleWidth]: the grip only has to be
+  /// seen, while the target has to be hit — on a touch screen, by a finger with
+  /// no cursor to aim with. The header narrows this for a column too thin to
+  /// give up the space, so a wide target never swallows a narrow column's own
+  /// tap.
+  final double resizeTouchTargetWidth;
+
+  /// Narrowest a resize drag may make a column, whatever the pointer does. A
+  /// column dragged to nothing cannot be grabbed again.
+  final double minColumnWidth;
+
+  /// How far the alpha ramp reaches back from the edge under
+  /// [FitGridOverflow.fade].
+  final double fadeExtent;
+
+  /// Widest the truncation tooltip may grow before it wraps.
+  final double tooltipMaxWidth;
+
+  final BorderRadius tooltipBorderRadius;
+
+  /// Header affordance for a column sorted ascending.
+  final IconData sortAscendingIcon;
+
+  /// Header affordance for a column sorted descending.
+  final IconData sortDescendingIcon;
+
+  /// Header affordance for a sortable column that is not currently sorting.
+  final IconData sortUnsortedIcon;
+
+  /// Grip drawn on a resizable column divider.
+  final IconData resizeGripIcon;
   final double sortIconSize;
 
   /// Overrides for the density-derived defaults. Null means "follow
@@ -177,10 +231,21 @@ class FitGridThemeData {
     Color? focusOutline,
     Color? sortIconColor,
     Color? placeholderForeground,
+    Color? tooltipBackground,
+    Color? tooltipForeground,
     FitGridDensity? density,
     double? dividerThickness,
     BorderRadius? borderRadius,
     double? resizeHandleWidth,
+    double? resizeTouchTargetWidth,
+    double? minColumnWidth,
+    double? fadeExtent,
+    double? tooltipMaxWidth,
+    BorderRadius? tooltipBorderRadius,
+    IconData? sortAscendingIcon,
+    IconData? sortDescendingIcon,
+    IconData? sortUnsortedIcon,
+    IconData? resizeGripIcon,
     double? sortIconSize,
     EdgeInsets? headerPadding,
     EdgeInsets? cellPadding,
@@ -204,10 +269,22 @@ class FitGridThemeData {
       sortIconColor: sortIconColor ?? this.sortIconColor,
       placeholderForeground:
           placeholderForeground ?? this.placeholderForeground,
+      tooltipBackground: tooltipBackground ?? this.tooltipBackground,
+      tooltipForeground: tooltipForeground ?? this.tooltipForeground,
       density: density ?? this.density,
       dividerThickness: dividerThickness ?? this.dividerThickness,
       borderRadius: borderRadius ?? this.borderRadius,
       resizeHandleWidth: resizeHandleWidth ?? this.resizeHandleWidth,
+      resizeTouchTargetWidth:
+          resizeTouchTargetWidth ?? this.resizeTouchTargetWidth,
+      minColumnWidth: minColumnWidth ?? this.minColumnWidth,
+      fadeExtent: fadeExtent ?? this.fadeExtent,
+      tooltipMaxWidth: tooltipMaxWidth ?? this.tooltipMaxWidth,
+      tooltipBorderRadius: tooltipBorderRadius ?? this.tooltipBorderRadius,
+      sortAscendingIcon: sortAscendingIcon ?? this.sortAscendingIcon,
+      sortDescendingIcon: sortDescendingIcon ?? this.sortDescendingIcon,
+      sortUnsortedIcon: sortUnsortedIcon ?? this.sortUnsortedIcon,
+      resizeGripIcon: resizeGripIcon ?? this.resizeGripIcon,
       sortIconSize: sortIconSize ?? this.sortIconSize,
       headerPadding: headerPadding ?? this.headerPadding,
       cellPadding: cellPadding ?? this.cellPadding,
@@ -234,6 +311,8 @@ class FitGridThemeData {
         other.focusOutline == focusOutline &&
         other.sortIconColor == sortIconColor &&
         other.placeholderForeground == placeholderForeground &&
+        other.tooltipBackground == tooltipBackground &&
+        other.tooltipForeground == tooltipForeground &&
         other.density == density &&
         other.dividerThickness == dividerThickness &&
         other.borderRadius == borderRadius &&
@@ -242,7 +321,16 @@ class FitGridThemeData {
         other.headerPadding == headerPadding &&
         other.cellPadding == cellPadding &&
         other.headerHeight == headerHeight &&
-        other.rowHeight == rowHeight;
+        other.rowHeight == rowHeight &&
+        other.resizeTouchTargetWidth == resizeTouchTargetWidth &&
+        other.minColumnWidth == minColumnWidth &&
+        other.fadeExtent == fadeExtent &&
+        other.tooltipMaxWidth == tooltipMaxWidth &&
+        other.tooltipBorderRadius == tooltipBorderRadius &&
+        other.sortAscendingIcon == sortAscendingIcon &&
+        other.sortDescendingIcon == sortDescendingIcon &&
+        other.sortUnsortedIcon == sortUnsortedIcon &&
+        other.resizeGripIcon == resizeGripIcon;
   }
 
   @override
@@ -261,6 +349,8 @@ class FitGridThemeData {
     focusOutline,
     sortIconColor,
     placeholderForeground,
+    tooltipBackground,
+    tooltipForeground,
     density,
     dividerThickness,
     borderRadius,
@@ -270,6 +360,15 @@ class FitGridThemeData {
     cellPadding,
     headerHeight,
     rowHeight,
+    resizeTouchTargetWidth,
+    minColumnWidth,
+    fadeExtent,
+    tooltipMaxWidth,
+    tooltipBorderRadius,
+    sortAscendingIcon,
+    sortDescendingIcon,
+    sortUnsortedIcon,
+    resizeGripIcon,
   ]);
 }
 

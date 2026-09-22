@@ -1,5 +1,6 @@
 import 'package:fitgrid/fitgrid.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'employee.dart';
 
@@ -61,6 +62,8 @@ class _ExamplePageState extends State<ExamplePage> {
   bool _striped = true;
   bool _stretch = true;
   bool _rtl = false;
+  bool _wrapNotes = false;
+  bool _paginated = false;
 
   @override
   void initState() {
@@ -94,6 +97,14 @@ class _ExamplePageState extends State<ExamplePage> {
       label: 'Name',
       value: (e) => e.name,
       sortable: true,
+      // Double-click a cell to edit it. Exactly one editor widget exists, and
+      // only while it is open — the rest of the column stays painted.
+      editor: FitGridEditor<Employee>(
+        validator: (row, value) =>
+            value.trim().isEmpty ? 'Name cannot be empty' : null,
+        onCommit: (row, index, value) =>
+            _applyEdit(index, row.copyWith(name: value.trim())),
+      ),
     ),
     FitGridColumn<Employee>(
       id: 'department',
@@ -106,6 +117,10 @@ class _ExamplePageState extends State<ExamplePage> {
       label: 'Role',
       value: (e) => e.role,
       sortable: true,
+      editor: FitGridEditor<Employee>(
+        onCommit: (row, index, value) =>
+            _applyEdit(index, row.copyWith(role: value.trim())),
+      ),
     ),
     FitGridColumn<Employee>(
       id: 'salary',
@@ -114,6 +129,17 @@ class _ExamplePageState extends State<ExamplePage> {
       alignment: FitGridAlignment.end,
       sortable: true,
       comparator: (a, b) => a.salary.compareTo(b.salary),
+      editor: FitGridEditor<Employee>(
+        // The cell paints a formatted string; the editor should not make the
+        // user retype the currency symbol and the separators.
+        initialText: (row) => row.salary.toString(),
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        validator: (row, value) =>
+            int.tryParse(value) == null ? 'Enter a whole number' : null,
+        onCommit: (row, index, value) =>
+            _applyEdit(index, row.copyWith(salary: int.parse(value))),
+      ),
     ),
     FitGridColumn<Employee>(
       id: 'started',
@@ -127,11 +153,38 @@ class _ExamplePageState extends State<ExamplePage> {
       id: 'note',
       label: 'Note',
       value: (e) => e.note,
-      // Long free text would otherwise dominate the whole grid.
+      // Long free text would otherwise dominate the whole grid. The `max` is
+      // also what gives the wrapping mode below something to wrap against: an
+      // unclamped `auto` column just widens until the text fits on one line.
       width: const FitGridColumnWidth.auto(max: 280),
       overflow: FitGridOverflow.tooltipOnTruncate,
+      maxLines: _wrapNotes ? 3 : 1,
     ),
   ];
+
+  /// Lets the note column wrap, and asks rows to size themselves to it.
+  ///
+  /// Both halves are needed: `maxLines` alone has no room to spend under a
+  /// uniform row height, and `contentSized` alone has nothing to measure when
+  /// every cell is one line.
+  void _setWrapNotes(bool value) {
+    setState(() => _wrapNotes = value);
+    _controller.columns.columns = _columns();
+  }
+
+  /// The grid never mutates your rows, so applying an edit is the host's job.
+  /// [index] is into the full row list, which is what makes this correct while
+  /// the grid is sorted or paginated.
+  void _applyEdit(int index, Employee updated) {
+    final rows = List<Employee>.of(_controller.data.rows);
+    // `data.rows` is the unsorted list; the index the grid reports is into the
+    // sorted view, so find the row by identity rather than trusting position.
+    final original = _controller.data.view[index];
+    final at = rows.indexOf(original);
+    if (at < 0) return;
+    rows[at] = updated;
+    _controller.data.rows = rows;
+  }
 
   void _setRowCount(int count) {
     setState(() => _rowCount = count);
@@ -177,6 +230,13 @@ class _ExamplePageState extends State<ExamplePage> {
               onStretch: (v) => setState(() => _stretch = v),
               rtl: _rtl,
               onRtl: (v) => setState(() => _rtl = v),
+              wrapNotes: _wrapNotes,
+              onWrapNotes: _setWrapNotes,
+              // Drag a header divider to resize a column, or double-click it to
+              // re-fit that one. This does the same to all of them at once.
+              onResetWidths: _controller.columns.autoSizeAll,
+              paginated: _paginated,
+              onPaginated: (v) => setState(() => _paginated = v),
             ),
             Expanded(
               child: Padding(
@@ -186,6 +246,10 @@ class _ExamplePageState extends State<ExamplePage> {
                   theme: FitGridThemeData.fromTheme(theme, density: _density),
                   striped: _striped,
                   stretchColumnsToFill: _stretch,
+                  rowHeight: _wrapNotes
+                      ? const FitGridRowHeight.contentSized(min: 40, max: 120)
+                      : null,
+                  paginated: _paginated,
                 ),
               ),
             ),
@@ -209,6 +273,11 @@ class _Controls extends StatelessWidget {
     required this.onStretch,
     required this.rtl,
     required this.onRtl,
+    required this.wrapNotes,
+    required this.onWrapNotes,
+    required this.onResetWidths,
+    required this.paginated,
+    required this.onPaginated,
   });
 
   final int rowCount;
@@ -222,6 +291,11 @@ class _Controls extends StatelessWidget {
   final ValueChanged<bool> onStretch;
   final bool rtl;
   final ValueChanged<bool> onRtl;
+  final bool wrapNotes;
+  final ValueChanged<bool> onWrapNotes;
+  final VoidCallback onResetWidths;
+  final bool paginated;
+  final ValueChanged<bool> onPaginated;
 
   @override
   Widget build(BuildContext context) {
@@ -277,6 +351,21 @@ class _Controls extends StatelessWidget {
             label: const Text('RTL'),
             selected: rtl,
             onSelected: onRtl,
+          ),
+          FilterChip(
+            label: const Text('Wrap notes'),
+            selected: wrapNotes,
+            onSelected: onWrapNotes,
+          ),
+          FilterChip(
+            label: const Text('Paginate'),
+            selected: paginated,
+            onSelected: onPaginated,
+          ),
+          OutlinedButton.icon(
+            onPressed: onResetWidths,
+            icon: const Icon(Icons.straighten_outlined, size: 18),
+            label: const Text('Re-fit columns'),
           ),
         ],
       ),

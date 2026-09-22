@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 
 import '../model/enums.dart';
 import '../model/fitgrid_column.dart';
+import 'fitgrid_editing.dart';
+import 'fitgrid_pagination.dart';
 
 /// Rows, and the ordering applied to them.
 ///
@@ -126,8 +128,23 @@ class FitGridColumnState<T> extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Returns a column to its declared width policy — what a double-click on the
-  /// resize handle does, re-fitting it to its content.
+  /// Returns a column to its declared width policy — what a double-click on
+  /// the resize handle does, re-fitting an `auto` column to its content.
+  ///
+  /// Dropping the override rather than measuring here and pinning the result is
+  /// the whole trick: measurement needs a theme, a text direction and a text
+  /// scaler, none of which a `ChangeNotifier` has any business knowing about.
+  /// The sizer already does it on the next build, and a column left to its
+  /// policy keeps re-fitting as the data changes instead of freezing at
+  /// whatever it measured the day it was double-clicked.
+  void autoSize(String id) => clearWidth(id);
+
+  /// Hands every column back to its width policy. What the user gets from
+  /// double-clicking each divider in turn.
+  void autoSizeAll() => clearAllWidths();
+
+  /// Drops a column's user-applied width. See [autoSize], which is the same
+  /// operation named for what people use it for.
   void clearWidth(String id) {
     if (_widthOverrides.remove(id) == null) return;
     notifyListeners();
@@ -138,6 +155,10 @@ class FitGridColumnState<T> extends ChangeNotifier {
     _widthOverrides.clear();
     notifyListeners();
   }
+
+  /// Whether a column is currently pinned to a user-applied width rather than
+  /// following its policy.
+  bool isResized(String id) => _widthOverrides.containsKey(id);
 
   void setVisible(String id, bool visible) {
     final index = _columns.indexWhere((column) => column.id == id);
@@ -201,7 +222,12 @@ class FitGridController<T> {
     List<T> rows = const [],
     List<FitGridColumn<T>> columns = const [],
   }) : data = FitGridDataState<T>(rows: rows),
-       columns = FitGridColumnState<T>(columns: columns);
+       columns = FitGridColumnState<T>(columns: columns) {
+    pagination.rowCount = rows.length;
+    // The page must survive a sort but not a resize of the dataset, so the
+    // pager follows the data rather than being driven from the widget.
+    data.addListener(() => pagination.rowCount = data.length);
+  }
 
   /// Rows and their ordering.
   final FitGridDataState<T> data;
@@ -209,8 +235,15 @@ class FitGridController<T> {
   /// Column order, visibility and widths.
   final FitGridColumnState<T> columns;
 
-  /// Selected rows.
+  /// Selected rows, by index into the full row list — not the page.
   final FitGridSelectionState selection = FitGridSelectionState();
+
+  /// Which cell is open for editing, if any.
+  final FitGridEditingState editing = FitGridEditingState();
+
+  /// Which page is on screen. Inert until `FitGrid.paginated` is on, or
+  /// [FitGridPaginationState.enabled] is set here.
+  final FitGridPaginationState pagination = FitGridPaginationState();
 
   /// Cycles the sort on a column: ascending, descending, unsorted.
   void toggleSort(String columnId) {
@@ -223,5 +256,7 @@ class FitGridController<T> {
     data.dispose();
     columns.dispose();
     selection.dispose();
+    pagination.dispose();
+    editing.dispose();
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui show Gradient;
 import 'dart:ui' show PointMode;
 
 import 'package:flutter/foundation.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/rendering.dart';
 
 import '../model/enums.dart';
 import '../sizing/column_layout.dart';
+import '../sizing/row_metrics.dart';
 import '../theme/fitgrid_theme.dart';
 import 'cell_spec.dart';
 
@@ -61,28 +63,30 @@ class RenderFitGridSection extends RenderBox
     required int specVersion,
     required FitGridThemeData theme,
     required TextDirection textDirection,
-    required int rowCount,
-    required double rowHeight,
+    required FitGridRowMetrics rowMetrics,
     required ViewportOffset vertical,
     required ViewportOffset horizontal,
     int overscanRows = 2,
     TextScaler textScaler = TextScaler.noScaling,
     FitGridRowColorResolver? rowColor,
     bool striped = true,
+    int editingRow = -1,
+    int editingColumn = -1,
   }) : _columnLayout = columnLayout,
        _paintColumns = paintColumns,
        _cellSpec = cellSpec,
        _specVersion = specVersion,
        _theme = theme,
        _textDirection = textDirection,
-       _rowCount = rowCount,
-       _rowHeight = rowHeight,
+       _rowMetrics = rowMetrics,
        _vertical = vertical,
        _horizontal = horizontal,
        _overscanRows = overscanRows,
        _textScaler = textScaler,
        _rowColor = rowColor,
-       _striped = striped;
+       _striped = striped,
+       _editingRow = editingRow,
+       _editingColumn = editingColumn;
 
   // ---------------------------------------------------------------- geometry
 
@@ -112,22 +116,27 @@ class RenderFitGridSection extends RenderBox
     markNeedsPaint();
   }
 
-  int _rowCount;
-  int get rowCount => _rowCount;
-  set rowCount(int value) {
-    if (_rowCount == value) return;
-    _rowCount = value;
+  FitGridRowMetrics _rowMetrics;
+
+  /// Where every row sits and how tall it is.
+  ///
+  /// Row count lives here rather than beside it: a count without the heights
+  /// that go with it is half a geometry, and keeping them in one object is what
+  /// stops the two from ever disagreeing mid-layout.
+  FitGridRowMetrics get rowMetrics => _rowMetrics;
+  set rowMetrics(FitGridRowMetrics value) {
+    if (identical(_rowMetrics, value) || _rowMetrics == value) return;
+    _rowMetrics = value;
     markNeedsLayout();
   }
 
-  double _rowHeight;
-  double get rowHeight => _rowHeight;
-  set rowHeight(double value) {
-    if (_rowHeight == value) return;
-    _rowHeight = value;
-    _clearCache();
-    markNeedsLayout();
-  }
+  int get rowCount => _rowMetrics.rowCount;
+
+  /// Height of a single row.
+  double rowHeightAt(int row) => _rowMetrics.heightOf(row);
+
+  /// Top edge of a row in content space.
+  double rowOffsetAt(int row) => _rowMetrics.offsetOf(row);
 
   // ----------------------------------------------------------------- window
 
@@ -255,6 +264,23 @@ class RenderFitGridSection extends RenderBox
     markNeedsPaint();
   }
 
+  int _editingRow;
+  int _editingColumn;
+
+  /// The cell currently covered by an editor, or (-1, -1).
+  ///
+  /// Its painted text is skipped: the editor is an overlay child sitting on top
+  /// of it, and painting the old value underneath would show through anything
+  /// translucent and double up on anything that is not.
+  (int, int) get editingCell => (_editingRow, _editingColumn);
+  set editingCell((int, int) value) {
+    final (row, column) = value;
+    if (_editingRow == row && _editingColumn == column) return;
+    _editingRow = row;
+    _editingColumn = column;
+    markNeedsPaint();
+  }
+
   // ------------------------------------------------------------ paint caches
 
   final Map<int, _CachedCell> _cells = <int, _CachedCell>{};
@@ -287,10 +313,10 @@ class RenderFitGridSection extends RenderBox
   // ---------------------------------------------------------------- layout
 
   int get _lastVisibleRow =>
-      math.min(_firstVisibleRow + _visibleRowCount, _rowCount);
+      math.min(_firstVisibleRow + _visibleRowCount, rowCount);
 
   /// Total height of all rows, whether or not they are in the window.
-  double get contentHeight => _rowCount * _rowHeight;
+  double get contentHeight => _rowMetrics.totalHeight;
 
   /// Total width of all columns.
   double get contentWidth => _columnLayout.totalWidth;
@@ -354,11 +380,13 @@ class RenderFitGridSection extends RenderBox
         ? _horizontal.pixels.clamp(0.0, maxHorizontal)
         : 0.0;
 
-    final first = math.max(
-      0,
-      (_verticalOffset / _rowHeight).floor() - _overscanRows,
-    );
-    final span = (size.height / _rowHeight).ceil() + 1 + _overscanRows * 2;
+    // Windowing goes through the metrics rather than dividing by a height, so
+    // the uniform case stays arithmetic and the measured case becomes a binary
+    // search without anything here changing.
+    final anchor = _rowMetrics.clampedRowAt(_verticalOffset);
+    final first = math.max(0, anchor - _overscanRows);
+    final span =
+        _rowMetrics.rowsSpanning(anchor, size.height) + _overscanRows * 2;
     if (first != _firstVisibleRow || span != _visibleRowCount) {
       _firstVisibleRow = first;
       _visibleRowCount = span;
@@ -381,13 +409,17 @@ class RenderFitGridSection extends RenderBox
         data.offset = Offset.zero;
       } else {
         final width = _columnLayout.widths[columnIndex];
+        final inRange = rowIndex >= 0 && rowIndex < rowCount;
         child.layout(
-          BoxConstraints.tightFor(width: width, height: _rowHeight),
+          BoxConstraints.tightFor(
+            width: width,
+            height: inRange ? _rowMetrics.heightOf(rowIndex) : 0.0,
+          ),
           parentUsesSize: false,
         );
         data.offset = Offset(
           _dx(columnIndex, width) - _horizontalOffset,
-          rowIndex * _rowHeight - _verticalOffset,
+          (inRange ? _rowMetrics.offsetOf(rowIndex) : 0.0) - _verticalOffset,
         );
       }
       child = data.nextSibling;
@@ -411,7 +443,7 @@ class RenderFitGridSection extends RenderBox
 
   @override
   void paint(PaintingContext context, Offset offset) {
-    if (_columnLayout.isEmpty || _rowCount == 0) return;
+    if (_columnLayout.isEmpty || rowCount == 0) return;
     context.canvas.save();
     context.canvas.clipRect(offset & size);
     _paintRows(context.canvas, offset);
@@ -447,10 +479,10 @@ class RenderFitGridSection extends RenderBox
               ? _theme.alternateRowBackground
               : _theme.rowBackground);
       if (color.a == 0) continue;
-      final top = offset.dy + row * _rowHeight - _verticalOffset;
+      final top = offset.dy + _rowMetrics.offsetOf(row) - _verticalOffset;
       paint.color = color;
       canvas.drawRect(
-        Rect.fromLTWH(offset.dx, top, size.width, _rowHeight),
+        Rect.fromLTWH(offset.dx, top, size.width, _rowMetrics.heightOf(row)),
         paint,
       );
     }
@@ -478,7 +510,7 @@ class RenderFitGridSection extends RenderBox
     final bottom = offset.dy + size.height;
 
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
-      final y = offset.dy + (row + 1) * _rowHeight - _verticalOffset;
+      final y = offset.dy + _rowMetrics.offsetOf(row + 1) - _verticalOffset;
       buffer[i++] = offset.dx;
       buffer[i++] = y;
       buffer[i++] = offset.dx + size.width;
@@ -515,16 +547,20 @@ class RenderFitGridSection extends RenderBox
     final padding = _theme.effectiveCellPadding;
 
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
-      final top = offset.dy + row * _rowHeight - _verticalOffset;
+      final top = offset.dy + _rowMetrics.offsetOf(row) - _verticalOffset;
+      final height = _rowMetrics.heightOf(row);
 
       for (var column = firstColumn; column < lastColumn; column++) {
         if (_paintColumns[column].isWidgetColumn) continue;
+        if (row == _editingRow && column == _editingColumn) continue;
 
         final width = _columnLayout.widths[column];
         final available = width - padding.horizontal;
         if (available <= 0) continue;
+        final availableHeight = height - padding.vertical;
+        if (availableHeight <= 0) continue;
 
-        final cell = _cellFor(row, column, available);
+        final cell = _cellFor(row, column, available, availableHeight);
         final left = offset.dx + _dx(column, width) - _horizontalOffset;
 
         final free = available - cell.painter.width;
@@ -533,13 +569,82 @@ class RenderFitGridSection extends RenderBox
           FitGridAlignment.center => padding.left + math.max(0, free) / 2,
           FitGridAlignment.end => padding.left + math.max(0, free),
         };
-
-        cell.painter.paint(
-          canvas,
-          Offset(left + inset, top + (_rowHeight - cell.painter.height) / 2),
+        final origin = Offset(
+          left + inset,
+          top + (height - cell.painter.height) / 2,
         );
+
+        final fading =
+            _paintColumns[column].overflow == FitGridOverflow.fade &&
+            cell.truncated;
+
+        // A cell that still does not fit — one line taller than the whole row,
+        // say — is clipped to its own box rather than allowed to paint over its
+        // neighbours. The save/restore is skipped in the overwhelmingly common
+        // case where the text already fits, because this runs per cell per
+        // frame of a scroll.
+        if (fading) {
+          _paintFaded(
+            canvas,
+            cell,
+            origin,
+            Rect.fromLTWH(left, top, width, height),
+            padding.right,
+          );
+        } else if (cell.overflows) {
+          canvas
+            ..save()
+            ..clipRect(Rect.fromLTWH(left, top, width, height));
+          cell.painter.paint(canvas, origin);
+          canvas.restore();
+        } else {
+          cell.painter.paint(canvas, origin);
+        }
       }
     }
+  }
+
+  /// Paints a cell that ran out of room with a soft alpha ramp at the edge the
+  /// text runs off, instead of an ellipsis.
+  ///
+  /// The ramp is cut out of the glyphs rather than painted over them: a
+  /// translucent overlay in the row colour would be wrong the moment a row is
+  /// selected, striped or given a custom colour, and would show as a smear over
+  /// whatever is behind. `dstOut` erases the text itself, so the fade reveals
+  /// the real background whatever it happens to be.
+  void _paintFaded(
+    Canvas canvas,
+    _CachedCell cell,
+    Offset origin,
+    Rect cellRect,
+    double inset,
+  ) {
+    final rtl = _textDirection == TextDirection.rtl;
+    final rampWidth = math.min(_theme.fadeExtent, cellRect.width);
+    final edge = rtl ? cellRect.left : cellRect.right;
+    final ramp = Rect.fromLTWH(
+      rtl ? edge - inset : edge - inset - rampWidth,
+      cellRect.top,
+      rampWidth,
+      cellRect.height,
+    );
+
+    canvas
+      ..saveLayer(cellRect, Paint())
+      ..clipRect(cellRect);
+    cell.painter.paint(canvas, origin);
+    canvas
+      ..drawRect(
+        ramp,
+        Paint()
+          ..blendMode = BlendMode.dstOut
+          ..shader = ui.Gradient.linear(
+            rtl ? ramp.centerRight : ramp.centerLeft,
+            rtl ? ramp.centerLeft : ramp.centerRight,
+            const <Color>[Color(0x00000000), Color(0xFF000000)],
+          ),
+      )
+      ..restore();
   }
 
   /// Resolves a column's alignment against the text direction, so `start`
@@ -556,20 +661,26 @@ class RenderFitGridSection extends RenderBox
 
   /// The cached painter for a cell, laid out only when something it depends on
   /// has actually changed.
-  _CachedCell _cellFor(int row, int column, double maxWidth) {
+  ///
+  /// [maxHeight] is the cell's content box, and a wrapping cell is capped to the
+  /// lines that fit inside it. Without that cap a row clamped by
+  /// `FitGridRowHeight.contentSized(max: ...)` — or a wrapping column under a
+  /// fixed row height — lays its text out at full height and paints it straight
+  /// over the rows above and below.
+  _CachedCell _cellFor(int row, int column, double maxWidth, double maxHeight) {
     final key = _cellKey(row, column);
     final spec = _cellSpec(row, column);
     final existing = _cells[key];
 
     if (existing != null &&
         existing.spec == spec &&
-        existing.maxWidth == maxWidth) {
+        existing.maxWidth == maxWidth &&
+        existing.maxHeight == maxHeight) {
       return existing;
     }
 
     final painter =
-        existing?.painter ??
-        TextPainter(maxLines: 1, textDirection: _textDirection);
+        existing?.painter ?? TextPainter(textDirection: _textDirection);
     painter
       ..text = TextSpan(text: spec.text, style: spec.style)
       ..textDirection = _textDirection
@@ -577,16 +688,40 @@ class RenderFitGridSection extends RenderBox
       ..ellipsis = switch (spec.overflow) {
         FitGridOverflow.ellipsis || FitGridOverflow.tooltipOnTruncate => '…',
         FitGridOverflow.fade || FitGridOverflow.clip => null,
-      }
+      };
+
+    // The line budget is settled before the layout, not after it. Laying the
+    // text out unbounded and trimming it afterwards would cost two layouts, and
+    // it does not even work: a `TextPainter` carrying an ellipsis with a null
+    // `maxLines` ellipsizes on the first line rather than wrapping, so an
+    // unbounded cell would silently come back one line tall.
+    //
+    // `preferredLineHeight` is available before layout, which is what makes
+    // this possible.
+    final lineHeight = painter.preferredLineHeight;
+    final affordable = lineHeight > 0
+        ? math.max(1, maxHeight ~/ lineHeight)
+        : 1;
+    final lines = spec.maxLines == null
+        ? affordable
+        : math.min(spec.maxLines!, affordable);
+
+    painter
+      ..maxLines = lines
       ..layout(maxWidth: maxWidth);
 
     final cell = _CachedCell(
       painter: painter,
       spec: spec,
       maxWidth: maxWidth,
+      maxHeight: maxHeight,
       truncated:
           painter.didExceedMaxLines ||
           painter.maxIntrinsicWidth > maxWidth + 0.5,
+      // Whole lines are all the budget above can trim. A single line taller
+      // than the row it sits in has nowhere left to go, and gets clipped.
+      overflows:
+          painter.height > maxHeight + 0.5 || painter.width > maxWidth + 0.5,
     );
     _cells[key] = cell;
     return cell;
@@ -597,14 +732,10 @@ class RenderFitGridSection extends RenderBox
   /// The row at a vertical offset in this section's local coordinates, or -1
   /// when the offset falls outside the content.
   ///
-  /// With uniform row heights this is arithmetic. It becomes a binary search
-  /// over a prefix-sum table once content-sized rows land, which is why callers
-  /// go through it rather than dividing themselves.
-  int rowAtOffset(double dy) {
-    final contentY = dy + _verticalOffset;
-    if (contentY < 0 || contentY >= contentHeight) return -1;
-    return (contentY ~/ _rowHeight).clamp(0, _rowCount - 1);
-  }
+  /// Arithmetic when rows share a height, a binary search over a prefix-sum
+  /// table when they do not — which is why callers go through it rather than
+  /// dividing themselves.
+  int rowAtOffset(double dy) => _rowMetrics.rowAtOffset(dy + _verticalOffset);
 
   /// The visible-column index at a horizontal offset in local coordinates, or
   /// -1 when outside the content.
@@ -630,6 +761,14 @@ class RenderFitGridSection extends RenderBox
   bool isTruncated(int row, int column) =>
       _cells[_cellKey(row, column)]?.truncated ?? false;
 
+  /// Height of a cell's laid-out text, or null if it is outside the window.
+  ///
+  /// Observable for the same reason [paintedCellCount] is: a cell taller than
+  /// its row paints over its neighbours, and that is a regression a test should
+  /// be able to catch without reading pixels.
+  double? paintedTextHeight(int row, int column) =>
+      _cells[_cellKey(row, column)]?.painter.height;
+
   /// The text painted into a cell. Used by `package:fitgrid/testing.dart`,
   /// which exists because painted text is invisible to `find.text`.
   String cellText(int row, int column) => _cellSpec(row, column).text;
@@ -651,13 +790,20 @@ class RenderFitGridSection extends RenderBox
   void debugFillProperties(DiagnosticPropertiesBuilder properties) {
     super.debugFillProperties(properties);
     properties
-      ..add(IntProperty('rowCount', _rowCount))
+      ..add(IntProperty('rowCount', rowCount))
       ..add(IntProperty('firstVisibleRow', _firstVisibleRow))
       ..add(IntProperty('visibleRowCount', _visibleRowCount))
       ..add(IntProperty('cachedPainters', _cells.length))
       ..add(IntProperty('specVersion', _specVersion))
       ..add(DoubleProperty('contentWidth', contentWidth))
-      ..add(DoubleProperty('contentHeight', contentHeight));
+      ..add(DoubleProperty('contentHeight', contentHeight))
+      ..add(
+        FlagProperty(
+          'uniformRows',
+          value: _rowMetrics.isUniform,
+          ifFalse: 'content-sized rows',
+        ),
+      );
   }
 }
 
@@ -666,11 +812,21 @@ class _CachedCell {
     required this.painter,
     required this.spec,
     required this.maxWidth,
+    required this.maxHeight,
     required this.truncated,
+    required this.overflows,
   });
 
   final TextPainter painter;
   final FitGridCellSpec spec;
   final double maxWidth;
+  final double maxHeight;
+
+  /// Whether any of the cell's text was dropped — by an ellipsis, by the line
+  /// cap, or by running past the column edge.
   final bool truncated;
+
+  /// Whether the laid-out text still exceeds its box and so has to be clipped
+  /// at paint time.
+  final bool overflows;
 }

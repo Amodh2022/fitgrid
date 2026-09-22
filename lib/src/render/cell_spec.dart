@@ -14,12 +14,18 @@ class FitGridCellSpec {
     required this.style,
     required this.alignment,
     required this.overflow,
+    this.maxLines = 1,
   });
 
   final String text;
   final TextStyle style;
   final FitGridAlignment alignment;
   final FitGridOverflow overflow;
+
+  /// Line budget for this cell, or null for as many lines as it takes. Part of
+  /// the spec rather than the column config because it changes what the cached
+  /// painter laid out, and so has to take part in the equality check below.
+  final int? maxLines;
 
   @override
   bool operator ==(Object other) =>
@@ -28,10 +34,11 @@ class FitGridCellSpec {
           other.text == text &&
           other.style == style &&
           other.alignment == alignment &&
-          other.overflow == overflow;
+          other.overflow == overflow &&
+          other.maxLines == maxLines;
 
   @override
-  int get hashCode => Object.hash(text, style, alignment, overflow);
+  int get hashCode => Object.hash(text, style, alignment, overflow, maxLines);
 
   @override
   String toString() => 'FitGridCellSpec("$text")';

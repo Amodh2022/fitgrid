@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import '../render/cell_spec.dart';
 import '../render/render_fitgrid_section.dart';
 import '../sizing/column_layout.dart';
+import '../sizing/row_metrics.dart';
 import '../theme/fitgrid_theme.dart';
 
 /// Widget wrapper around [RenderFitGridSection].
@@ -17,13 +18,13 @@ class FitGridSection extends MultiChildRenderObjectWidget {
     required this.cellSpec,
     required this.specVersion,
     required this.theme,
-    required this.rowCount,
-    required this.rowHeight,
+    required this.rowMetrics,
     required this.vertical,
     required this.horizontal,
     this.overscanRows = 2,
     this.rowColor,
     this.striped = true,
+    this.editingCell = (-1, -1),
     super.children,
     super.key,
   });
@@ -33,13 +34,16 @@ class FitGridSection extends MultiChildRenderObjectWidget {
   final FitGridCellSpecResolver cellSpec;
   final int specVersion;
   final FitGridThemeData theme;
-  final int rowCount;
-  final double rowHeight;
+  final FitGridRowMetrics rowMetrics;
   final ViewportOffset vertical;
   final ViewportOffset horizontal;
   final int overscanRows;
   final FitGridRowColorResolver? rowColor;
   final bool striped;
+
+  /// The cell an editor is covering, as (row, column) indices into this
+  /// section, or (-1, -1) when none is open.
+  final (int, int) editingCell;
 
   @override
   RenderFitGridSection createRenderObject(BuildContext context) {
@@ -51,13 +55,14 @@ class FitGridSection extends MultiChildRenderObjectWidget {
       theme: theme,
       textDirection: Directionality.of(context),
       textScaler: MediaQuery.textScalerOf(context),
-      rowCount: rowCount,
-      rowHeight: rowHeight,
+      rowMetrics: rowMetrics,
       vertical: vertical,
       horizontal: horizontal,
       overscanRows: overscanRows,
       rowColor: rowColor,
       striped: striped,
+      editingRow: editingCell.$1,
+      editingColumn: editingCell.$2,
     );
   }
 
@@ -74,13 +79,13 @@ class FitGridSection extends MultiChildRenderObjectWidget {
       ..theme = theme
       ..textDirection = Directionality.of(context)
       ..textScaler = MediaQuery.textScalerOf(context)
-      ..rowCount = rowCount
-      ..rowHeight = rowHeight
+      ..rowMetrics = rowMetrics
       ..vertical = vertical
       ..horizontal = horizontal
       ..overscanRows = overscanRows
       ..rowColor = rowColor
-      ..striped = striped;
+      ..striped = striped
+      ..editingCell = editingCell;
   }
 }
 

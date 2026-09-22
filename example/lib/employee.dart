@@ -22,6 +22,16 @@ class Employee {
   final DateTime startedOn;
   final String note;
 
+  Employee copyWith({String? name, String? role, int? salary}) => Employee(
+    id: id,
+    name: name ?? this.name,
+    department: department,
+    role: role ?? this.role,
+    salary: salary ?? this.salary,
+    startedOn: startedOn,
+    note: note,
+  );
+
   String get salaryText =>
       '\$${salary.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]},')}';
 

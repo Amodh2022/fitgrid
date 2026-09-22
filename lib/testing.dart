@@ -65,6 +65,18 @@ int fitGridLaidOutRowCount(WidgetTester tester, {Finder? of}) {
       section.firstVisibleRow;
 }
 
+/// The resolved height of a row.
+///
+/// Uniform under [FitGridRowHeight.fixed]; under
+/// [FitGridRowHeight.contentSized] this is what the row actually measured to,
+/// which is the assertion worth making about a wrapping column.
+double fitGridRowHeight(WidgetTester tester, int row, {Finder? of}) =>
+    fitGridSection(tester, of: of).rowHeightAt(row);
+
+/// The top edge of a row in content space, measured from the first row.
+double fitGridRowOffset(WidgetTester tester, int row, {Finder? of}) =>
+    fitGridSection(tester, of: of).rowOffsetAt(row);
+
 /// The resolved width of a column, by column id.
 double fitGridColumnWidth(WidgetTester tester, String columnId, {Finder? of}) =>
     fitGridSection(tester, of: of).columnLayout.widthOf(columnId);
@@ -79,6 +91,18 @@ bool fitGridCellIsTruncated(
   required int column,
   Finder? of,
 }) => fitGridSection(tester, of: of).isTruncated(row, column);
+
+/// The height of a cell's laid-out text.
+///
+/// Null for a cell outside the viewport, which has not been laid out. Assert on
+/// it against [fitGridRowHeight] to prove a wrapping cell stays inside its row
+/// rather than painting over the one below.
+double? fitGridPaintedTextHeight(
+  WidgetTester tester, {
+  required int row,
+  required int column,
+  Finder? of,
+}) => fitGridSection(tester, of: of).paintedTextHeight(row, column);
 
 /// Asserts that a cell paints [expected].
 void expectFitGridCell(

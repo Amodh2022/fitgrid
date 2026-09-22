@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import 'column_width.dart';
 import 'enums.dart';
+import 'fitgrid_editor.dart';
 
 /// Resolves the painted text for one cell.
 typedef FitGridCellValue<T> = String Function(T row);
@@ -42,6 +43,7 @@ class FitGridColumn<T> {
     this.alignment = FitGridAlignment.start,
     this.headerAlignment,
     this.overflow = FitGridOverflow.ellipsis,
+    this.maxLines = 1,
     this.freeze = FitGridFreeze.none,
     this.visible = true,
     this.resizable = true,
@@ -51,7 +53,8 @@ class FitGridColumn<T> {
     this.headerBuilder,
     this.cellStyle,
     this.tooltip,
-  });
+    this.editor,
+  }) : assert(maxLines == null || maxLines > 0, 'maxLines must be positive');
 
   /// Stable identity for this column. Used as the key for widths, sort state,
   /// column order and selection, so it must be unique within a grid and must
@@ -76,6 +79,18 @@ class FitGridColumn<T> {
 
   /// What happens when the text is wider than the column.
   final FitGridOverflow overflow;
+
+  /// How many lines a cell may wrap onto before [overflow] takes over. Null
+  /// means as many as the text needs.
+  ///
+  /// Worth anything only under [FitGridRowHeight.contentSized]: a fixed row
+  /// height has no room to give a second line, so the extra lines would be
+  /// clipped by the row below. Pairing it with a width that actually constrains
+  /// the text matters too — a [FitGridColumnWidth.auto] column measures its
+  /// longest cell on one line and then sizes itself to fit it, so nothing ever
+  /// wraps. Give a wrapping column a `fixed` width, or an `auto` one with a
+  /// `max`.
+  final int? maxLines;
 
   /// Whether this column is pinned to an edge during horizontal scroll.
   final FitGridFreeze freeze;
@@ -109,6 +124,15 @@ class FitGridColumn<T> {
   /// Tooltip shown on the header cell.
   final String? tooltip;
 
+  /// Makes this column's cells editable. Null leaves them read-only.
+  ///
+  /// The editor is a real widget, but only one exists and only while a cell is
+  /// open — see [FitGridEditor].
+  final FitGridEditor<T>? editor;
+
+  /// Whether a cell in this column can be opened for editing.
+  bool get isEditable => editor != null;
+
   /// Effective header alignment.
   FitGridAlignment get effectiveHeaderAlignment => headerAlignment ?? alignment;
 
@@ -125,6 +149,7 @@ class FitGridColumn<T> {
     FitGridAlignment? alignment,
     FitGridAlignment? headerAlignment,
     FitGridOverflow? overflow,
+    int? maxLines,
     FitGridFreeze? freeze,
     bool? visible,
     bool? resizable,
@@ -134,6 +159,7 @@ class FitGridColumn<T> {
     WidgetBuilder? headerBuilder,
     FitGridCellStyle<T>? cellStyle,
     String? tooltip,
+    FitGridEditor<T>? editor,
   }) {
     return FitGridColumn<T>(
       id: id ?? this.id,
@@ -143,6 +169,7 @@ class FitGridColumn<T> {
       alignment: alignment ?? this.alignment,
       headerAlignment: headerAlignment ?? this.headerAlignment,
       overflow: overflow ?? this.overflow,
+      maxLines: maxLines ?? this.maxLines,
       freeze: freeze ?? this.freeze,
       visible: visible ?? this.visible,
       resizable: resizable ?? this.resizable,
@@ -152,6 +179,7 @@ class FitGridColumn<T> {
       headerBuilder: headerBuilder ?? this.headerBuilder,
       cellStyle: cellStyle ?? this.cellStyle,
       tooltip: tooltip ?? this.tooltip,
+      editor: editor ?? this.editor,
     );
   }
 
