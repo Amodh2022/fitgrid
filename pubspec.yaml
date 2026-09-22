@@ -1,0 +1,32 @@
+name: fitgrid
+description: >-
+  A Flutter data grid that measures your content instead of making you guess
+  column widths, and paints cells instead of building a widget for each one.
+version: 0.0.1-dev
+repository: https://github.com/amodhnadiger/fitgrid
+issue_tracker: https://github.com/amodhnadiger/fitgrid/issues
+
+topics:
+  - table
+  - data-table
+  - data-grid
+  - performance
+
+environment:
+  sdk: ^3.9.0
+  flutter: ">=3.27.0"
+
+# Core has zero non-Flutter dependencies, on purpose. Heavy or opinionated
+# things (xlsx/pdf export, state management, localization) either live in a
+# companion package or are exposed as hooks for the host to wire up.
+dependencies:
+  flutter:
+    sdk: flutter
+  # A real dependency, not a dev one: `package:fitgrid/testing.dart` is shipped
+  # API and imports it. Painted cells are invisible to `find.text`, so the
+  # helpers that read them have to come in the box.
+  flutter_test:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
