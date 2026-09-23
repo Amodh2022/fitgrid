@@ -97,7 +97,7 @@ class FitGrid<T> extends StatefulWidget {
     this.pagerBuilder,
     this.overscanRows = 2,
     this.editTrigger = FitGridEditTrigger.doubleTap,
-    this.selectionMode = FitGridSelectionMode.none,
+    this.selectionMode,
     this.showSelectionColumn = false,
     this.onSelectionChanged,
     this.keyboardNavigation = true,
@@ -220,7 +220,11 @@ class FitGrid<T> extends StatefulWidget {
   final FitGridEditTrigger editTrigger;
 
   /// Whether, and how many, rows the user may select.
-  final FitGridSelectionMode selectionMode;
+  ///
+  /// Null leaves whatever the controller already holds, which matters when the
+  /// controller is yours: a grid that pushed a default down here would clear a
+  /// selection you had set before the first build.
+  final FitGridSelectionMode? selectionMode;
 
   /// Adds a pinned checkbox column at the leading edge.
   ///
@@ -357,8 +361,9 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       _pageKey = null;
       _displayColumnsKey = null;
     }
-    if (widget.selectionMode != oldWidget.selectionMode) {
-      _controller.selection.mode = widget.selectionMode;
+    if (widget.selectionMode != oldWidget.selectionMode &&
+        widget.selectionMode != null) {
+      _controller.selection.mode = widget.selectionMode!;
     }
     if (widget.paginated != oldWidget.paginated ||
         widget.pageSize != oldWidget.pageSize) {
@@ -373,7 +378,9 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   /// and `columns`. A caller-supplied controller is left alone — it is theirs.
   void _syncOwnedController() {
     final controller = _controller;
-    controller.selection.mode = widget.selectionMode;
+    if (widget.selectionMode != null) {
+      controller.selection.mode = widget.selectionMode!;
+    }
     if (widget.controller != null) return;
     if (!identical(controller.columns.columns, widget.columns)) {
       controller.columns.columns = widget.columns;
@@ -1112,7 +1119,17 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     if (total == 0) return;
 
     final focus = _controller.focus;
-    final currentRow = focus.rowIndex ?? rows.offset;
+
+    // The first key press establishes the focus rather than moving it. Arrowing
+    // down into a grid that has never been focused should land on its first
+    // row, not on its second.
+    if (!focus.hasFocus) {
+      focus.moveTo(rows.offset, columns.first.id);
+      _controller.scrollTo(rows.offset, columnId: columns.first.id);
+      return;
+    }
+
+    final currentRow = focus.rowIndex!;
     var currentColumn = _focusedColumnIndex(columns);
     if (currentColumn < 0) currentColumn = 0;
 

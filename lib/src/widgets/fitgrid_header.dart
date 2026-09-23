@@ -447,7 +447,8 @@ class _HeaderCell<T> extends StatelessWidget {
     // not have.
     Widget cell = Semantics(
       header: true,
-      label: column.label,
+      // No `label` here: the cell already contains a `Text` with the same
+      // string, and setting both makes a reader say the column name twice.
       sortKey: const OrdinalSortKey(0),
       button: onTap != null,
       hint: onTap == null
