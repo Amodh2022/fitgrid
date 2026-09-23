@@ -82,6 +82,16 @@ class FitGridMoveRowIntent extends Intent {
   final int delta;
 }
 
+/// Reverts the most recent edit.
+class FitGridUndoIntent extends Intent {
+  const FitGridUndoIntent();
+}
+
+/// Reapplies the most recently undone edit.
+class FitGridRedoIntent extends Intent {
+  const FitGridRedoIntent();
+}
+
 /// Clears the selection, or closes an open editor.
 class FitGridDismissIntent extends Intent {
   const FitGridDismissIntent();
@@ -173,6 +183,14 @@ kFitGridShortcuts = <ShortcutActivator, Intent>{
   ),
   SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
       FitGridMoveRowIntent(1),
+
+  SingleActivator(LogicalKeyboardKey.keyZ, control: true): FitGridUndoIntent(),
+  SingleActivator(LogicalKeyboardKey.keyZ, meta: true): FitGridUndoIntent(),
+  SingleActivator(LogicalKeyboardKey.keyZ, control: true, shift: true):
+      FitGridRedoIntent(),
+  SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true):
+      FitGridRedoIntent(),
+  SingleActivator(LogicalKeyboardKey.keyY, control: true): FitGridRedoIntent(),
 
   SingleActivator(LogicalKeyboardKey.escape): FitGridDismissIntent(),
 };

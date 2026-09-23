@@ -21,6 +21,8 @@ export 'src/controller/fitgrid_editing.dart' show FitGridEditingState;
 export 'src/controller/fitgrid_filter.dart' show FitGridFilterState;
 export 'src/controller/fitgrid_focus.dart' show FitGridFocusState;
 export 'src/controller/fitgrid_grouping.dart' show FitGridGroupingState;
+export 'src/controller/fitgrid_history.dart'
+    show FitGridCellChange, FitGridEditHistory;
 export 'src/controller/fitgrid_pagination.dart' show FitGridPaginationState;
 export 'src/controller/fitgrid_saved_state.dart' show FitGridSavedState;
 export 'src/controller/fitgrid_range.dart'
@@ -118,7 +120,9 @@ export 'src/widgets/fitgrid_intents.dart'
         FitGridMoveRowIntent,
         FitGridPageIntent,
         FitGridPasteIntent,
+        FitGridRedoIntent,
         FitGridSelectAllIntent,
         FitGridToggleSelectionIntent,
+        FitGridUndoIntent,
         kFitGridShortcuts;
 export 'src/widgets/fitgrid_pager.dart' show FitGridPageLabel, FitGridPager;

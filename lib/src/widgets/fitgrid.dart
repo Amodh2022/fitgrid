@@ -7,6 +7,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../controller/fitgrid_controller.dart';
+import '../controller/fitgrid_history.dart';
 import '../controller/fitgrid_pagination.dart';
 import '../controller/fitgrid_range.dart';
 import '../export/fitgrid_export.dart';
@@ -128,6 +129,7 @@ class FitGrid<T> extends StatefulWidget {
     this.enableCopy = true,
     this.cellSelection = false,
     this.enablePaste = true,
+    this.enableUndo = true,
     this.hoverHighlight = true,
     this.rowColor,
     this.contextMenuBuilder,
@@ -407,6 +409,16 @@ class FitGrid<T> extends StatefulWidget {
   /// [FitGridColumn.editor] take values, each through its own validator and
   /// commit — the grid never writes to a row itself.
   final bool enablePaste;
+
+  /// Whether Ctrl+Z (Cmd+Z) undoes the last edit and Ctrl+Shift+Z or Ctrl+Y
+  /// redoes it. Typed edits, pastes and clears are each one step, recorded on
+  /// [FitGridController.history] — which [FitGridController.undo] and
+  /// [FitGridController.redo] also drive, for a toolbar button.
+  ///
+  /// Undo writes the old value back through the column's own commit, so the
+  /// host's rows change exactly as they would for a typed edit. Not
+  /// available with a [dataSource].
+  final bool enableUndo;
 
   /// Whether the row under the pointer is highlighted. Painted, not built.
   final bool hoverHighlight;
@@ -712,6 +724,10 @@ class _FitGridState<T> extends State<FitGrid<T>> {
 
   Widget _build(BuildContext context, BoxConstraints constraints) {
     final controller = _controller;
+    final rowKey = widget.rowKey;
+    controller.history.keyOf = rowKey == null
+        ? _identityKey
+        : (row) => rowKey(row as T);
     final theme = widget.theme ?? FitGridTheme.of(context);
     final textDirection = Directionality.of(context);
     final textScaler = MediaQuery.textScalerOf(context);
@@ -2372,6 +2388,20 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         return null;
       },
     ),
+    FitGridUndoIntent: _GridAction<FitGridUndoIntent>(
+      enabled: () =>
+          _gridHasKeyboard() &&
+          widget.enableUndo &&
+          _controller.history.canUndo,
+      onInvoke: (_) => _controller.undo(),
+    ),
+    FitGridRedoIntent: _GridAction<FitGridRedoIntent>(
+      enabled: () =>
+          _gridHasKeyboard() &&
+          widget.enableUndo &&
+          _controller.history.canRedo,
+      onInvoke: (_) => _controller.redo(),
+    ),
     FitGridPasteIntent: _GridAction<FitGridPasteIntent>(
       enabled: () =>
           _gridHasKeyboard() &&
@@ -2784,6 +2814,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   /// rules a user typing into an editor is held to.
   List<FitGridCellEdit<T>> _applyEdits(List<FitGridCellEdit<T>> edits) {
     final applied = <FitGridCellEdit<T>>[];
+    final changes = <FitGridCellChange>[];
     final data = _controller.data;
     // Whether a commit can move rows: under a sort or a filter, writing a value
     // may reorder the view or drop a row from it, so an index no longer names
@@ -2805,6 +2836,15 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         if (current != null) row = current;
       }
       if (editor.validator?.call(row, edit.value) != null) continue;
+      changes.add(
+        FitGridCellChange(
+          rowKey: _historyKey(row),
+          rowIndex: edit.rowIndex,
+          columnId: edit.column.id,
+          before: editor.initialText?.call(row) ?? edit.column.value(row),
+          after: edit.value,
+        ),
+      );
       editor.onCommit(row, edit.rowIndex, edit.value);
       applied.add(
         FitGridCellEdit<T>(
@@ -2815,6 +2855,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         ),
       );
     }
+    _record(changes);
     return applied;
   }
 
@@ -2960,8 +3001,28 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       return false;
     }
     _controller.editing.cancel();
+    final before = editor.initialText?.call(row) ?? column.value(row);
     editor.onCommit(row, globalRow, value);
+    _record(<FitGridCellChange>[
+      FitGridCellChange(
+        rowKey: _historyKey(row),
+        rowIndex: globalRow,
+        columnId: column.id,
+        before: before,
+        after: value,
+      ),
+    ]);
     return true;
+  }
+
+  static Object _identityKey(Object? row) => row!;
+
+  /// A row's identity in the edit history.
+  Object _historyKey(T row) => widget.rowKey?.call(row) ?? row as Object;
+
+  void _record(List<FitGridCellChange> changes) {
+    if (!widget.enableUndo || widget.dataSource != null) return;
+    _controller.history.record(changes);
   }
 
   /// Tab: the next editable column on this row, then the first editable column

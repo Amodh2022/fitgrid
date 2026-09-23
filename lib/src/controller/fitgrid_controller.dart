@@ -10,6 +10,7 @@ import 'fitgrid_editing.dart';
 import 'fitgrid_filter.dart';
 import 'fitgrid_focus.dart';
 import 'fitgrid_grouping.dart';
+import 'fitgrid_history.dart';
 import 'fitgrid_pagination.dart';
 import 'fitgrid_range.dart';
 import 'fitgrid_saved_state.dart';
@@ -564,6 +565,48 @@ class FitGridController<T> {
   /// is set.
   final FitGridDetailState details = FitGridDetailState();
 
+  /// The user's edits, for [undo] and [redo].
+  final FitGridEditHistory history = FitGridEditHistory();
+
+  /// Reverts the most recent edit — a typed value, a paste, a clear — by
+  /// committing the previous values back through the columns' editors.
+  /// Returns whether there was anything to undo.
+  bool undo() => _replay(history.takeUndo());
+
+  /// Reapplies the most recently undone edit.
+  bool redo() => _replay(history.takeRedo());
+
+  bool _replay(List<FitGridCellChange>? changes) {
+    if (changes == null) return false;
+    // Built on the first change whose row has moved, and at most once: undoing
+    // a paste of a thousand cells should not scan the rows a thousand times.
+    Map<Object, int>? byKey;
+    for (final change in changes) {
+      final editor = columns.byId(change.columnId)?.editor;
+      if (editor == null) continue;
+      final view = data.view;
+      var index = change.rowIndex;
+      final inPlace =
+          index >= 0 &&
+          index < view.length &&
+          history.keyOf(view[index]) == change.rowKey;
+      if (!inPlace) {
+        byKey ??= <Object, int>{
+          for (var i = 0; i < view.length; i++) history.keyOf(view[i]): i,
+        };
+        // A key that matches nothing — a replaced immutable row with no
+        // `rowKey` — falls back to where the row was.
+        index = byKey[change.rowKey] ?? index;
+      }
+      if (index < 0 || index >= view.length) continue;
+      // No validator: the value was valid when it was written, and refusing
+      // to put it back would strand the user with the edit they meant to
+      // take back.
+      editor.onCommit(view[index], index, change.after);
+    }
+    return true;
+  }
+
   void Function(int rowIndex, String? columnId, double padding)? _reveal;
 
   /// Wires the controller to a mounted grid so [scrollTo] has something to
@@ -739,5 +782,6 @@ class FitGridController<T> {
     grouping.dispose();
     range.dispose();
     details.dispose();
+    history.dispose();
   }
 }
