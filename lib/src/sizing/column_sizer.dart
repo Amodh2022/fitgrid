@@ -25,9 +25,37 @@ import 'column_order.dart';
 /// [FitGridAutoWidth.measureAllRows] escapes it entirely when a table is small
 /// enough to afford the truth.
 class FitGridColumnSizer {
-  FitGridColumnSizer();
+  FitGridColumnSizer({this.measurementBudget = 2000})
+    : assert(measurementBudget > 0);
+
+  /// How many rows one pass of [FitGridAutoWidth.measureAllRows] may measure.
+  ///
+  /// Measuring a hundred thousand rows takes longer than a frame, and a first
+  /// frame that never arrives is worse than a column that is briefly a little
+  /// narrow. Past this budget the pass stops, reports itself incomplete through
+  /// [isComplete], and resumes on the next build with the widths it has —
+  /// which only ever grow, so the column widens towards the truth instead of
+  /// jumping around on the way there.
+  final int measurementBudget;
 
   final TextPainter _painter = TextPainter(maxLines: 1);
+
+  /// Identity of the (columns, rows) pair the progress below belongs to.
+  Object? _progressKey;
+
+  /// How many rows of each exhaustively-measured column have been seen.
+  final Map<String, int> _measuredRows = <String, int>{};
+
+  /// The widest value seen so far in each of those columns.
+  final Map<String, double> _widest = <String, double>{};
+
+  bool _isComplete = true;
+
+  /// Whether the last [resolve] measured everything it was asked to.
+  ///
+  /// False means the widths on screen are provisional and the caller should
+  /// build again to continue. [FitGrid] does that for you.
+  bool get isComplete => _isComplete;
 
   /// Resolves every visible column to a width.
   ///
@@ -47,7 +75,28 @@ class FitGridColumnSizer {
     // Already partitioned when the caller came through the controller; doing
     // it again is O(columns) and keeps a direct caller honest.
     final visible = fitGridVisibleColumns(columns);
-    if (visible.isEmpty) return FitGridColumnLayout.empty;
+    if (visible.isEmpty) {
+      _isComplete = true;
+      return FitGridColumnLayout.empty;
+    }
+
+    // Progress belongs to one dataset and one set of columns. Anything else
+    // would carry a stale maximum across a sort or a filter.
+    final progressKey = Object.hash(
+      identityHashCode(columns),
+      identityHashCode(rows),
+      rows.length,
+      theme,
+      textDirection,
+      textScaler,
+    );
+    if (_progressKey != progressKey) {
+      _progressKey = progressKey;
+      _measuredRows.clear();
+      _widest.clear();
+    }
+    _isComplete = true;
+    var budget = measurementBudget;
 
     final headerChrome =
         theme.effectiveHeaderPadding.horizontal + theme.dividerThickness;
@@ -111,20 +160,47 @@ class FitGridColumnSizer {
           // column to something nobody renders, so leave such columns to their
           // header and to any explicit min.
           if (column.cellBuilder == null && rows.isNotEmpty) {
-            final candidates = measureAllRows
-                ? rows.map(column.value)
-                : _longestByChars(rows, column.value, sampleSize);
-            for (final text in candidates) {
-              if (text.isEmpty) continue;
-              final width =
-                  _measure(
-                    text,
-                    theme.cellTextStyle,
-                    textDirection,
-                    textScaler,
-                  ) +
-                  cellChrome;
-              if (width > widest) widest = width;
+            if (measureAllRows) {
+              // Exhaustive measurement is the expensive path, so it is the one
+              // that gets rationed. Each pass picks up where the last left off.
+              var from = _measuredRows[column.id] ?? 0;
+              widest = math.max(widest, _widest[column.id] ?? 0);
+              final to = math.min(rows.length, from + budget);
+              for (; from < to; from++) {
+                final text = column.value(rows[from]);
+                if (text.isEmpty) continue;
+                final width =
+                    _measure(
+                      text,
+                      theme.cellTextStyle,
+                      textDirection,
+                      textScaler,
+                    ) +
+                    cellChrome;
+                if (width > widest) widest = width;
+              }
+              budget -= to - (_measuredRows[column.id] ?? 0);
+              _measuredRows[column.id] = to;
+              _widest[column.id] = widest;
+              if (to < rows.length) _isComplete = false;
+              if (budget <= 0) budget = 0;
+            } else {
+              for (final text in _longestByChars(
+                rows,
+                column.value,
+                sampleSize,
+              )) {
+                if (text.isEmpty) continue;
+                final width =
+                    _measure(
+                      text,
+                      theme.cellTextStyle,
+                      textDirection,
+                      textScaler,
+                    ) +
+                    cellChrome;
+                if (width > widest) widest = width;
+              }
             }
           }
           widths[i] = policy.clamp(widest);

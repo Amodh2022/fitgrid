@@ -49,6 +49,32 @@ void main() {
     expect(fitGridSection().paintedCellCount, window * 2);
   });
 
+  testWidgets('identical values share one painter', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 600,
+            height: 400,
+            child: FitGrid<_Row>(
+              rows: List<_Row>.generate(40, (i) => const _Row('Active', 'ok')),
+              columns: [
+                FitGridColumn<_Row>(id: 'a', label: 'A', value: (r) => r.a),
+                FitGridColumn<_Row>(id: 'b', label: 'B', value: (r) => r.b),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // Forty rows of the same two words is two laid-out cells, not eighty. This
+    // is the whole reason the cache is keyed on content: a status column is the
+    // most repetitive thing in any real table.
+    expect(fitGridSection().paintedCellCount, 2);
+  });
+
   testWidgets('prunes painters for rows that scrolled away', (tester) async {
     await tester.pumpWidget(_grid(5000, height: 200));
     await tester.pump();
@@ -59,7 +85,10 @@ void main() {
 
     // Without pruning the cache would simply grow for the length of the
     // scroll, which is the quiet way a painted grid becomes a memory leak.
+    // Painters are keyed by content rather than by position, so a scroll keeps
+    // a little slack for the rows it is passing — but the bound is the window,
+    // never the dataset.
     expect(fitGridSection().firstVisibleRow, greaterThan(100));
-    expect(fitGridSection().paintedCellCount, before);
+    expect(fitGridSection().paintedCellCount, lessThanOrEqualTo(before * 3));
   });
 }

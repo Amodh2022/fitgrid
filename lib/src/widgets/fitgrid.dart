@@ -1597,7 +1597,15 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       stretchToFill: widget.stretchColumnsToFill,
     );
     _layout = layout;
-    _layoutKey = key;
+    // A measurement pass that ran out of budget leaves the widths provisional,
+    // so the memo is not armed and the next build continues where this one
+    // stopped. See `FitGridColumnSizer.measurementBudget`.
+    _layoutKey = _sizer.isComplete ? key : null;
+    if (!_sizer.isComplete) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    }
     return layout;
   }
 

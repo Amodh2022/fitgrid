@@ -379,8 +379,27 @@ class RenderFitGridSection extends RenderBox
 
   // ------------------------------------------------------------ paint caches
 
+  /// Laid-out cells, keyed by *what they contain* rather than by where they
+  /// are.
+  ///
+  /// Keying by position means a column of 400 rows all reading "Active" lays
+  /// that word out 400 times, and means a one-row scroll throws away every
+  /// painter it passes. Keying by content collapses repeats to a single
+  /// painter and survives scrolling, which is where a grid spends its frames.
+  ///
+  /// The key is the spec's hash together with the box it was laid out into. A
+  /// collision would be a cell painting another cell's text, so the entry is
+  /// verified on every hit and rebuilt if it does not match.
   final Map<int, _CachedCell> _cells = <int, _CachedCell>{};
+
+  /// Where each painted cell ended up, so the truncation and height queries can
+  /// still be asked positionally. Rebuilt as the text pass runs.
+  final Map<int, _CachedCell> _byCell = <int, _CachedCell>{};
+
   Float32List? _rulePoints;
+
+  /// Bumped on every paint, so an entry can record when it was last wanted.
+  int _paintEpoch = 0;
 
   static const int _columnStride = 1 << 20;
 
@@ -391,17 +410,25 @@ class RenderFitGridSection extends RenderBox
       cell.dispose();
     }
     _cells.clear();
+    _byCell.clear();
   }
 
-  /// Drops painters for rows that have scrolled out of the window, which is
-  /// what keeps the cache bounded by the viewport rather than the dataset.
+  /// Drops painters nothing has asked for recently.
+  ///
+  /// The bound is the window — rows on screen times columns on screen, with
+  /// room for a scroll's worth of churn — so the cache tracks the viewport and
+  /// never the dataset, whatever the content happens to be.
   void _pruneCache() {
-    if (_cells.isEmpty) return;
-    final first = _firstVisibleRow;
-    final last = _firstVisibleRow + _visibleRowCount;
-    _cells.removeWhere((key, cell) {
-      final row = key ~/ _columnStride;
-      if (row >= first && row < last) return false;
+    final budget = math.max(
+      64,
+      (_visibleRowCount + 2 * _overscanRows) *
+          math.max(1, _columnLayout.length) *
+          2,
+    );
+    if (_cells.length <= budget) return;
+    final epoch = _paintEpoch;
+    _cells.removeWhere((_, cell) {
+      if (cell.epoch >= epoch - 1) return false;
       cell.dispose();
       return true;
     });
@@ -492,7 +519,7 @@ class RenderFitGridSection extends RenderBox
     if (first != _firstVisibleRow || span != _visibleRowCount) {
       _firstVisibleRow = first;
       _visibleRowCount = span;
-      _pruneCache();
+      _byCell.clear();
       markNeedsSemanticsUpdate();
     }
 
@@ -600,6 +627,7 @@ class RenderFitGridSection extends RenderBox
     if (_columnLayout.isEmpty || rowCount == 0) return;
     final layout = _columnLayout;
     final canvas = context.canvas;
+    _paintEpoch++;
 
     canvas
       ..save()
@@ -655,6 +683,7 @@ class RenderFitGridSection extends RenderBox
     }
 
     canvas.restore();
+    _pruneCache();
     defaultPaint(context, offset);
   }
 
@@ -842,17 +871,13 @@ class RenderFitGridSection extends RenderBox
         );
         final cellRect = Rect.fromLTWH(left, top, width, height);
 
-        final fading =
-            _paintColumns[column].overflow == FitGridOverflow.fade &&
-            cell.truncated;
-
         // A cell that still does not fit — one line taller than the whole row,
         // say — is clipped to its own box rather than allowed to paint over its
         // neighbours. The save/restore is skipped in the overwhelmingly common
         // case where the text already fits, because this runs per cell per
         // frame of a scroll.
-        final needsClip = fading || cell.overflows;
-        if (needsClip && !fading) {
+        final needsClip = cell.overflows;
+        if (needsClip) {
           canvas
             ..save()
             ..clipRect(cellRect);
@@ -872,12 +897,9 @@ class RenderFitGridSection extends RenderBox
           _paintHighlights(canvas, cell, origin);
         }
 
-        if (fading) {
-          _paintFaded(canvas, cell, origin, cellRect, padding.right);
-        } else {
-          cell.painter.paint(canvas, origin);
-          if (needsClip) canvas.restore();
-        }
+        cell.painter.paint(canvas, origin);
+        if (needsClip) canvas.restore();
+        _byCell[_cellKey(row, column)] = cell;
       }
     }
   }
@@ -902,49 +924,6 @@ class RenderFitGridSection extends RenderBox
         canvas.drawRect(box.toRect().shift(origin), paint);
       }
     }
-  }
-
-  /// Paints a cell that ran out of room with a soft alpha ramp at the edge the
-  /// text runs off, instead of an ellipsis.
-  ///
-  /// The ramp is cut out of the glyphs rather than painted over them: a
-  /// translucent overlay in the row colour would be wrong the moment a row is
-  /// selected, striped or given a custom colour, and would show as a smear over
-  /// whatever is behind. `dstOut` erases the text itself, so the fade reveals
-  /// the real background whatever it happens to be.
-  void _paintFaded(
-    Canvas canvas,
-    _CachedCell cell,
-    Offset origin,
-    Rect cellRect,
-    double inset,
-  ) {
-    final rtl = _textDirection == TextDirection.rtl;
-    final rampWidth = math.min(_theme.fadeExtent, cellRect.width);
-    final edge = rtl ? cellRect.left : cellRect.right;
-    final ramp = Rect.fromLTWH(
-      rtl ? edge - inset : edge - inset - rampWidth,
-      cellRect.top,
-      rampWidth,
-      cellRect.height,
-    );
-
-    canvas
-      ..saveLayer(cellRect, Paint())
-      ..clipRect(cellRect);
-    cell.painter.paint(canvas, origin);
-    canvas
-      ..drawRect(
-        ramp,
-        Paint()
-          ..blendMode = BlendMode.dstOut
-          ..shader = ui.Gradient.linear(
-            rtl ? ramp.centerRight : ramp.centerLeft,
-            rtl ? ramp.centerLeft : ramp.centerRight,
-            const <Color>[Color(0x00000000), Color(0xFF000000)],
-          ),
-      )
-      ..restore();
   }
 
   /// The keyboard's current cell, outlined.
@@ -997,26 +976,39 @@ class RenderFitGridSection extends RenderBox
   /// fixed row height — lays its text out at full height and paints it straight
   /// over the rows above and below.
   _CachedCell _cellFor(int row, int column, double maxWidth, double maxHeight) {
-    final key = _cellKey(row, column);
     final spec = _cellSpec(row, column);
+    final key = Object.hash(spec, maxWidth, maxHeight);
     final existing = _cells[key];
 
+    // Verified, not trusted: the key is a hash, and a collision would be one
+    // cell painting another cell's text.
     if (existing != null &&
         existing.spec == spec &&
         existing.maxWidth == maxWidth &&
         existing.maxHeight == maxHeight) {
+      existing.epoch = _paintEpoch;
       return existing;
     }
 
+    final cell = _layOutCell(spec, maxWidth, maxHeight);
+    existing?.dispose();
+    _cells[key] = cell;
+    return cell;
+  }
+
+  _CachedCell _layOutCell(
+    FitGridCellSpec spec,
+    double maxWidth,
+    double maxHeight,
+  ) {
     // An icon is a glyph, so it is laid out by a painter of its own rather than
     // reserved as blank space and drawn by hand. It also has to be measured
     // before the text is, because what it takes is what the text does not get.
-    TextPainter? icon = existing?.icon;
+    TextPainter? icon;
     var iconAdvance = 0.0;
     if (spec.icon != null) {
       final size = spec.iconSize ?? _theme.cellIconSize;
-      icon ??= TextPainter(textDirection: _textDirection);
-      icon
+      icon = TextPainter(textDirection: _textDirection)
         ..text = TextSpan(
           text: String.fromCharCode(spec.icon!.codePoint),
           style: TextStyle(
@@ -1027,64 +1019,88 @@ class RenderFitGridSection extends RenderBox
             height: 1.0,
           ),
         )
-        ..textDirection = _textDirection
         ..layout();
       iconAdvance = icon.width + _theme.cellIconGap;
-    } else if (icon != null) {
-      icon.dispose();
-      icon = null;
     }
 
-    final painter =
-        existing?.painter ?? TextPainter(textDirection: _textDirection);
-    painter
-      ..text = TextSpan(text: spec.text, style: spec.style)
-      ..textDirection = _textDirection
+    final painter = TextPainter(textDirection: _textDirection)
       ..textScaler = _textScaler
       ..ellipsis = switch (spec.overflow) {
         FitGridOverflow.ellipsis || FitGridOverflow.tooltipOnTruncate => '…',
         FitGridOverflow.fade || FitGridOverflow.clip => null,
       };
 
-    // The line budget is settled before the layout, not after it. Laying the
-    // text out unbounded and trimming it afterwards would cost two layouts, and
-    // it does not even work: a `TextPainter` carrying an ellipsis with a null
-    // `maxLines` ellipsizes on the first line rather than wrapping, so an
-    // unbounded cell would silently come back one line tall.
-    //
-    // `preferredLineHeight` is available before layout, which is what makes
-    // this possible.
-    final lineHeight = painter.preferredLineHeight;
-    final affordable = lineHeight > 0
-        ? math.max(1, maxHeight ~/ lineHeight)
-        : 1;
-    final lines = spec.maxLines == null
-        ? affordable
-        : math.min(spec.maxLines!, affordable);
+    void layOut(TextStyle style) {
+      painter.text = TextSpan(text: spec.text, style: style);
+      // The line budget is settled before the layout, not after it. Laying the
+      // text out unbounded and trimming it afterwards would cost two layouts,
+      // and it does not even work: a `TextPainter` carrying an ellipsis with a
+      // null `maxLines` ellipsizes on the first line rather than wrapping, so
+      // an unbounded cell would silently come back one line tall.
+      //
+      // `preferredLineHeight` is available before layout, which is what makes
+      // this possible.
+      final lineHeight = painter.preferredLineHeight;
+      final affordable = lineHeight > 0
+          ? math.max(1, maxHeight ~/ lineHeight)
+          : 1;
+      painter
+        ..maxLines = spec.maxLines == null
+            ? affordable
+            : math.min(spec.maxLines!, affordable)
+        ..layout(maxWidth: math.max(0.0, maxWidth - iconAdvance));
+    }
+
+    layOut(spec.style);
 
     final textWidth = math.max(0.0, maxWidth - iconAdvance);
-    painter
-      ..maxLines = lines
-      ..layout(maxWidth: textWidth);
+    var truncated =
+        painter.didExceedMaxLines ||
+        painter.maxIntrinsicWidth > textWidth + 0.5;
 
-    final cell = _CachedCell(
+    // The fade is cut into the glyphs themselves, by painting them through an
+    // alpha gradient, rather than by erasing them afterwards with `dstOut`.
+    // The result looks the same — the real background shows through, whatever
+    // it is — but it costs one extra layout once, when the cell is first seen,
+    // instead of a `saveLayer` on every cell on every frame of a scroll. An
+    // offscreen render target per truncated cell is the most expensive thing a
+    // grid can do sixty times a second.
+    if (spec.overflow == FitGridOverflow.fade &&
+        truncated &&
+        spec.style.foreground == null) {
+      final color = spec.style.color ?? const Color(0xFF000000);
+      final ramp = math.min(_theme.fadeExtent, painter.width);
+      if (ramp > 0) {
+        final rtl = _textDirection == TextDirection.rtl;
+        layOut(
+          spec.style.copyWith(
+            color: null,
+            foreground: Paint()
+              ..shader = ui.Gradient.linear(
+                Offset(rtl ? ramp : painter.width - ramp, 0),
+                Offset(rtl ? 0 : painter.width, 0),
+                <Color>[color, color.withValues(alpha: 0)],
+              ),
+          ),
+        );
+        truncated = true;
+      }
+    }
+
+    return _CachedCell(
       painter: painter,
       icon: icon,
       iconAdvance: iconAdvance,
       spec: spec,
       maxWidth: maxWidth,
       maxHeight: maxHeight,
-      truncated:
-          painter.didExceedMaxLines ||
-          painter.maxIntrinsicWidth > textWidth + 0.5,
+      truncated: truncated,
       // Whole lines are all the budget above can trim. A single line taller
       // than the row it sits in has nowhere left to go, and gets clipped.
       overflows:
           painter.height > maxHeight + 0.5 ||
           painter.width + iconAdvance > maxWidth + 0.5,
-    );
-    _cells[key] = cell;
-    return cell;
+    )..epoch = _paintEpoch;
   }
 
   // ------------------------------------------------------------- semantics
@@ -1310,7 +1326,7 @@ class RenderFitGridSection extends RenderBox
   /// Whether a cell's text is currently ellipsized. Only meaningful for cells
   /// inside the window, since only those have been laid out.
   bool isTruncated(int row, int column) =>
-      _cells[_cellKey(row, column)]?.truncated ?? false;
+      _byCell[_cellKey(row, column)]?.truncated ?? false;
 
   /// Height of a cell's laid-out text, or null if it is outside the window.
   ///
@@ -1318,7 +1334,7 @@ class RenderFitGridSection extends RenderBox
   /// its row paints over its neighbours, and that is a regression a test should
   /// be able to catch without reading pixels.
   double? paintedTextHeight(int row, int column) =>
-      _cells[_cellKey(row, column)]?.painter.height;
+      _byCell[_cellKey(row, column)]?.painter.height;
 
   /// The text painted into a cell. Used by `package:fitgrid/testing.dart`,
   /// which exists because painted text is invisible to `find.text`.
@@ -1404,6 +1420,9 @@ class _CachedCell {
   /// Whether the laid-out text still exceeds its box and so has to be clipped
   /// at paint time.
   final bool overflows;
+
+  /// The paint this entry was last wanted for. What the cache evicts on.
+  int epoch = 0;
 
   bool get hasHighlights => spec.hasHighlights;
 
