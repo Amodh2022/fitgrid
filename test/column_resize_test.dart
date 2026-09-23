@@ -33,7 +33,7 @@ Offset _handleCentre(
   int index, {
   TextDirection textDirection = TextDirection.ltr,
 }) {
-  final layout = fitGridSection(tester).columnLayout;
+  final layout = fitGridSection().columnLayout;
   final grid = find.byType(FitGrid<_Row>);
   final edge = textDirection == TextDirection.rtl
       ? tester.getTopRight(grid)
@@ -88,10 +88,10 @@ void main() {
       _host(FitGrid<_Row>(controller: controller, stretchColumnsToFill: false)),
     );
 
-    final before = fitGridColumnWidth(tester, 'name');
+    final before = fitGridColumnWidth('name');
     await _dragHandle(tester, 0, 60);
 
-    expect(fitGridColumnWidth(tester, 'name'), closeTo(before + 60, 1));
+    expect(fitGridColumnWidth('name'), closeTo(before + 60, 1));
     expect(controller.columns.isResized('name'), isTrue);
   });
 
@@ -116,7 +116,7 @@ void main() {
 
     await _dragHandle(tester, 0, 400);
 
-    expect(fitGridColumnWidth(tester, 'name'), 140);
+    expect(fitGridColumnWidth('name'), 140);
   });
 
   testWidgets('double-clicking a divider re-fits the column', (tester) async {
@@ -133,11 +133,11 @@ void main() {
       _host(FitGrid<_Row>(controller: controller, stretchColumnsToFill: false)),
     );
 
-    final measured = fitGridColumnWidth(tester, 'name');
+    final measured = fitGridColumnWidth('name');
 
     controller.columns.setWidth('name', measured + 120);
     await tester.pump();
-    expect(fitGridColumnWidth(tester, 'name'), measured + 120);
+    expect(fitGridColumnWidth('name'), measured + 120);
 
     final centre = _handleCentre(tester, 0);
     await tester.tapAt(centre);
@@ -145,7 +145,7 @@ void main() {
     await tester.tapAt(centre);
     await tester.pump(kDoubleTapTimeout);
 
-    expect(fitGridColumnWidth(tester, 'name'), measured);
+    expect(fitGridColumnWidth('name'), measured);
     expect(controller.columns.isResized('name'), isFalse);
   });
 
@@ -168,11 +168,11 @@ void main() {
       ),
     );
 
-    final before = fitGridColumnWidth(tester, 'name');
+    final before = fitGridColumnWidth('name');
     // Leftwards, which is outwards — and so wider — under RTL.
     await _dragHandle(tester, 0, -50, textDirection: TextDirection.rtl);
 
-    expect(fitGridColumnWidth(tester, 'name'), closeTo(before + 50, 1));
+    expect(fitGridColumnWidth('name'), closeTo(before + 50, 1));
   });
 
   testWidgets('a pinned column gets no handle', (tester) async {
@@ -201,7 +201,7 @@ void main() {
 
     await _dragHandle(tester, 0, 60);
 
-    expect(fitGridColumnWidth(tester, 'name'), 120);
+    expect(fitGridColumnWidth('name'), 120);
   });
 
   testWidgets('resizableColumns: false removes the handles entirely', (
@@ -226,10 +226,10 @@ void main() {
       ),
     );
 
-    final before = fitGridColumnWidth(tester, 'name');
+    final before = fitGridColumnWidth('name');
     await _dragHandle(tester, 0, 60);
 
-    expect(fitGridColumnWidth(tester, 'name'), before);
+    expect(fitGridColumnWidth('name'), before);
     expect(controller.columns.isResized('name'), isFalse);
   });
 
@@ -247,7 +247,7 @@ void main() {
       _host(FitGrid<_Row>(controller: controller, stretchColumnsToFill: false)),
     );
 
-    final before = fitGridColumnWidth(tester, 'name');
+    final before = fitGridColumnWidth('name');
     final centre = _handleCentre(tester, 0);
 
     // 12px off the divider: well outside the 8px grip, comfortably inside a
@@ -260,7 +260,7 @@ void main() {
     await gesture.up();
     await tester.pump(kDoubleTapTimeout);
 
-    expect(fitGridColumnWidth(tester, 'name'), closeTo(before + 40, 1));
+    expect(fitGridColumnWidth('name'), closeTo(before + 40, 1));
   });
 
   testWidgets('a narrow column keeps half its own width', (tester) async {

@@ -8,9 +8,9 @@ void main() {
     await tester.pumpWidget(const ExampleApp());
     await tester.pumpAndSettle();
 
-    expect(fitGridRowCount(tester), 1000);
+    expect(fitGridRowCount(), 1000);
     // Painted, so there is no Text widget to find — read the cell spec instead.
-    expect(fitGridRowText(tester, 0).first, '1000');
-    expect(fitGridLaidOutRowCount(tester), lessThan(60));
+    expect(fitGridRowText(0).first, '1000');
+    expect(fitGridLaidOutRowCount(), lessThan(60));
   });
 }

@@ -44,6 +44,10 @@ class FitGridThemeData {
     this.sortDescendingIcon = Icons.arrow_downward_rounded,
     this.sortUnsortedIcon = Icons.unfold_more_rounded,
     this.resizeGripIcon = Icons.drag_indicator,
+    this.checkboxIcon = Icons.check_box_outline_blank_rounded,
+    this.checkboxCheckedIcon = Icons.check_box_rounded,
+    this.checkboxIndeterminateIcon = Icons.indeterminate_check_box_rounded,
+    this.selectionColumnWidth = 44.0,
     this.sortIconSize = 18.0,
     this.cellIconSize = 16.0,
     this.cellIconGap = 6.0,
@@ -194,6 +198,16 @@ class FitGridThemeData {
 
   /// Grip drawn on a resizable column divider.
   final IconData resizeGripIcon;
+
+  /// Glyphs for the built-in selection column. They are painted as text, not
+  /// built as `Checkbox` widgets, which is what keeps a selectable grid from
+  /// putting a widget back into every row.
+  final IconData checkboxIcon;
+  final IconData checkboxCheckedIcon;
+  final IconData checkboxIndeterminateIcon;
+
+  /// Width of the built-in selection column.
+  final double selectionColumnWidth;
   final double sortIconSize;
 
   /// Size of a glyph painted inside a cell by [FitGridColumn.icon].
@@ -277,6 +291,10 @@ class FitGridThemeData {
     IconData? sortDescendingIcon,
     IconData? sortUnsortedIcon,
     IconData? resizeGripIcon,
+    IconData? checkboxIcon,
+    IconData? checkboxCheckedIcon,
+    IconData? checkboxIndeterminateIcon,
+    double? selectionColumnWidth,
     double? sortIconSize,
     double? cellIconSize,
     double? cellIconGap,
@@ -322,6 +340,11 @@ class FitGridThemeData {
       sortDescendingIcon: sortDescendingIcon ?? this.sortDescendingIcon,
       sortUnsortedIcon: sortUnsortedIcon ?? this.sortUnsortedIcon,
       resizeGripIcon: resizeGripIcon ?? this.resizeGripIcon,
+      checkboxIcon: checkboxIcon ?? this.checkboxIcon,
+      checkboxCheckedIcon: checkboxCheckedIcon ?? this.checkboxCheckedIcon,
+      checkboxIndeterminateIcon:
+          checkboxIndeterminateIcon ?? this.checkboxIndeterminateIcon,
+      selectionColumnWidth: selectionColumnWidth ?? this.selectionColumnWidth,
       sortIconSize: sortIconSize ?? this.sortIconSize,
       cellIconSize: cellIconSize ?? this.cellIconSize,
       cellIconGap: cellIconGap ?? this.cellIconGap,
@@ -377,7 +400,11 @@ class FitGridThemeData {
         other.sortAscendingIcon == sortAscendingIcon &&
         other.sortDescendingIcon == sortDescendingIcon &&
         other.sortUnsortedIcon == sortUnsortedIcon &&
-        other.resizeGripIcon == resizeGripIcon;
+        other.resizeGripIcon == resizeGripIcon &&
+        other.checkboxIcon == checkboxIcon &&
+        other.checkboxCheckedIcon == checkboxCheckedIcon &&
+        other.checkboxIndeterminateIcon == checkboxIndeterminateIcon &&
+        other.selectionColumnWidth == selectionColumnWidth;
   }
 
   @override
@@ -422,6 +449,10 @@ class FitGridThemeData {
     sortDescendingIcon,
     sortUnsortedIcon,
     resizeGripIcon,
+    checkboxIcon,
+    checkboxCheckedIcon,
+    checkboxIndeterminateIcon,
+    selectionColumnWidth,
   ]);
 }
 

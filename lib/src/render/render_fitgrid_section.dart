@@ -1327,6 +1327,11 @@ class RenderFitGridSection extends RenderBox
   /// The full spec behind a cell, for tests that need more than its text.
   FitGridCellSpec cellSpecAt(int row, int column) => _cellSpec(row, column);
 
+  /// On-screen left edge of a column. Exposed for
+  /// `package:fitgrid/testing.dart`, where it is how a test proves a pinned
+  /// column stayed put while the rest scrolled.
+  double debugColumnLeft(int columnIndex) => _screenLeft(columnIndex);
+
   @override
   bool hitTestSelf(Offset position) => true;
 

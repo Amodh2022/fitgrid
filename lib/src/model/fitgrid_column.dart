@@ -23,7 +23,23 @@ typedef FitGridCellBuilder<T> =
     Widget Function(BuildContext context, T row, int rowIndex);
 
 /// Per-cell text style override, layered on top of the theme's cell style.
+///
+/// The index is into the full row list, not into the page on screen.
 typedef FitGridCellStyle<T> = TextStyle? Function(T row, int rowIndex);
+
+/// Resolves a glyph to paint before a cell's text, or null for none.
+///
+/// The index is into the full row list, as every index the grid hands out is.
+typedef FitGridCellIcon<T> = IconData? Function(T row, int rowIndex);
+
+/// Resolves the colour of that glyph, or null to follow the text.
+typedef FitGridCellIconColor<T> = Color? Function(T row, int rowIndex);
+
+/// Whether a row passes a column's filter.
+typedef FitGridRowPredicate<T> = bool Function(T row);
+
+/// Reduces the rows under a column to one string for the footer.
+typedef FitGridAggregate<T> = String Function(List<T> rows);
 
 /// One column of a [FitGridColumn]-driven grid.
 ///
@@ -47,7 +63,15 @@ class FitGridColumn<T> {
     this.freeze = FitGridFreeze.none,
     this.visible = true,
     this.resizable = true,
+    this.reorderable = true,
     this.sortable = false,
+    this.searchable = true,
+    this.icon,
+    this.iconColor,
+    this.semanticValue,
+    this.copyValue,
+    this.aggregate,
+    this.footerLabel,
     this.comparator,
     this.cellBuilder,
     this.headerBuilder,
@@ -103,6 +127,39 @@ class FitGridColumn<T> {
   /// and double-click that divider to re-fit it to its content.
   final bool resizable;
 
+  /// Whether the user can drag this column's header to move it. A pinned
+  /// column can still be reordered, but only within its own band.
+  final bool reorderable;
+
+  /// Whether the grid's search looks at this column. Turn it off for ids,
+  /// checksums and anything else where a coincidental match is noise.
+  final bool searchable;
+
+  /// A glyph painted before the cell's text.
+  ///
+  /// Painted by the same painter that draws the text, so a status icon costs a
+  /// glyph rather than turning the column into an overlay of `Icon` widgets.
+  final FitGridCellIcon<T>? icon;
+
+  /// Colour for [icon]. Null follows the cell's text colour.
+  final FitGridCellIconColor<T>? iconColor;
+
+  /// What a screen reader should announce for a cell, when the painted text is
+  /// not the right thing to say — "3m ago" painted, "3 minutes ago" spoken.
+  final FitGridCellValue<T>? semanticValue;
+
+  /// What the clipboard should receive for a cell. Defaults to [value], which
+  /// is right until the painted text is formatted for the eye rather than for
+  /// a spreadsheet.
+  final FitGridCellValue<T>? copyValue;
+
+  /// Reduces this column to a single footer value — a sum, a mean, a count.
+  /// Null leaves the footer cell blank.
+  final FitGridAggregate<T>? aggregate;
+
+  /// A label painted before the aggregate, such as `Total`.
+  final String? footerLabel;
+
   /// Whether tapping the header cycles this column's sort state.
   final bool sortable;
 
@@ -133,6 +190,12 @@ class FitGridColumn<T> {
   /// Whether a cell in this column can be opened for editing.
   bool get isEditable => editor != null;
 
+  /// The text the clipboard should carry for [row].
+  String copyTextFor(T row) => (copyValue ?? value)(row);
+
+  /// What a screen reader should say for [row].
+  String semanticTextFor(T row) => (semanticValue ?? value)(row);
+
   /// Effective header alignment.
   FitGridAlignment get effectiveHeaderAlignment => headerAlignment ?? alignment;
 
@@ -153,7 +216,15 @@ class FitGridColumn<T> {
     FitGridFreeze? freeze,
     bool? visible,
     bool? resizable,
+    bool? reorderable,
     bool? sortable,
+    bool? searchable,
+    FitGridCellIcon<T>? icon,
+    FitGridCellIconColor<T>? iconColor,
+    FitGridCellValue<T>? semanticValue,
+    FitGridCellValue<T>? copyValue,
+    FitGridAggregate<T>? aggregate,
+    String? footerLabel,
     Comparator<T>? comparator,
     FitGridCellBuilder<T>? cellBuilder,
     WidgetBuilder? headerBuilder,
@@ -173,7 +244,15 @@ class FitGridColumn<T> {
       freeze: freeze ?? this.freeze,
       visible: visible ?? this.visible,
       resizable: resizable ?? this.resizable,
+      reorderable: reorderable ?? this.reorderable,
       sortable: sortable ?? this.sortable,
+      searchable: searchable ?? this.searchable,
+      icon: icon ?? this.icon,
+      iconColor: iconColor ?? this.iconColor,
+      semanticValue: semanticValue ?? this.semanticValue,
+      copyValue: copyValue ?? this.copyValue,
+      aggregate: aggregate ?? this.aggregate,
+      footerLabel: footerLabel ?? this.footerLabel,
       comparator: comparator ?? this.comparator,
       cellBuilder: cellBuilder ?? this.cellBuilder,
       headerBuilder: headerBuilder ?? this.headerBuilder,

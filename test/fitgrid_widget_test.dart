@@ -62,8 +62,8 @@ void main() {
     // The whole premise of the package, asserted: the text is on screen but
     // there is no Text widget behind it.
     expect(find.text('Person 0'), findsNothing);
-    expectFitGridCell(tester, 'Person 0', row: 0, column: 0);
-    expectFitGridRow(tester, 1, ['Person 1', 'Designer', '50001']);
+    expect(fitGridCellText(row: 0, column: 0), 'Person 0');
+    expect(fitGridRowText(1), ['Person 1', 'Designer', '50001']);
   });
 
   testWidgets('measures columns from content', (tester) async {
@@ -83,10 +83,7 @@ void main() {
 
     // 'Name' holds a much longer string than 'Role', and nobody declared a
     // width for either.
-    expect(
-      fitGridColumnWidth(tester, 'name'),
-      greaterThan(fitGridColumnWidth(tester, 'role')),
-    );
+    expect(fitGridColumnWidth('name'), greaterThan(fitGridColumnWidth('role')));
   });
 
   testWidgets('lays out only the rows in the viewport', (tester) async {
@@ -97,10 +94,10 @@ void main() {
       ),
     );
 
-    expect(fitGridRowCount(tester), 100000);
+    expect(fitGridRowCount(), 100000);
     // The entire point of windowing. A 600px viewport at ~44px per row holds
     // well under 30 rows; anything near the dataset size means it regressed.
-    expect(fitGridLaidOutRowCount(tester), lessThan(40));
+    expect(fitGridLaidOutRowCount(), lessThan(40));
   });
 
   testWidgets('scrolling moves the window, not the dataset', (tester) async {
@@ -108,14 +105,14 @@ void main() {
       host(FitGrid<Employee>(rows: makeRows(5000), columns: columns())),
     );
 
-    expectFitGridCell(tester, 'Person 0', row: 0, column: 0);
-    final before = fitGridLaidOutRowCount(tester);
+    expect(fitGridCellText(row: 0, column: 0), 'Person 0');
+    final before = fitGridLaidOutRowCount();
 
     await tester.drag(find.byType(FitGrid<Employee>), const Offset(0, -4000));
     await tester.pump();
 
-    expect(fitGridSection(tester).firstVisibleRow, greaterThan(50));
-    expect(fitGridLaidOutRowCount(tester), before);
+    expect(fitGridSection().firstVisibleRow, greaterThan(50));
+    expect(fitGridLaidOutRowCount(), before);
   });
 
   testWidgets('sorting reorders rows and survives in painted text', (
@@ -128,24 +125,24 @@ void main() {
     addTearDown(controller.dispose);
 
     await tester.pumpWidget(host(FitGrid<Employee>(controller: controller)));
-    expectFitGridCell(tester, '50000', row: 0, column: 2);
+    expect(fitGridCellText(row: 0, column: 2), '50000');
 
     controller.toggleSort('salary');
     await tester.pump();
     expect(controller.data.sortDirection, FitGridSortDirection.ascending);
-    expectFitGridCell(tester, '50000', row: 0, column: 2);
+    expect(fitGridCellText(row: 0, column: 2), '50000');
 
     controller.toggleSort('salary');
     await tester.pump();
     expect(controller.data.sortDirection, FitGridSortDirection.descending);
     // Stale painted text would still read 50000 here — this is the assertion
     // that proves the painter cache is invalidated on a sort.
-    expectFitGridCell(tester, '50019', row: 0, column: 2);
+    expect(fitGridCellText(row: 0, column: 2), '50019');
 
     controller.toggleSort('salary');
     await tester.pump();
     expect(controller.data.sortDirection, FitGridSortDirection.none);
-    expectFitGridCell(tester, '50000', row: 0, column: 2);
+    expect(fitGridCellText(row: 0, column: 2), '50000');
   });
 
   testWidgets('tapping a sortable header sorts', (tester) async {
@@ -155,11 +152,11 @@ void main() {
 
     await tester.tap(find.text('Salary'));
     await tester.pump();
-    expectFitGridCell(tester, '50000', row: 0, column: 2);
+    expect(fitGridCellText(row: 0, column: 2), '50000');
 
     await tester.tap(find.text('Salary'));
     await tester.pump();
-    expectFitGridCell(tester, '50009', row: 0, column: 2);
+    expect(fitGridCellText(row: 0, column: 2), '50009');
   });
 
   testWidgets('hiding a column removes it from the layout', (tester) async {
@@ -170,12 +167,12 @@ void main() {
     addTearDown(controller.dispose);
 
     await tester.pumpWidget(host(FitGrid<Employee>(controller: controller)));
-    expect(fitGridSection(tester).columnLayout.ids, ['name', 'role', 'salary']);
+    expect(fitGridSection().columnLayout.ids, ['name', 'role', 'salary']);
 
     controller.columns.setVisible('role', false);
     await tester.pump();
-    expect(fitGridSection(tester).columnLayout.ids, ['name', 'salary']);
-    expectFitGridRow(tester, 0, ['Person 0', '50000']);
+    expect(fitGridSection().columnLayout.ids, ['name', 'salary']);
+    expect(fitGridRowText(0), ['Person 0', '50000']);
   });
 
   testWidgets('reports truncation for cells that did not fit', (tester) async {
@@ -202,7 +199,7 @@ void main() {
       ),
     );
 
-    expect(fitGridCellIsTruncated(tester, row: 0, column: 0), isTrue);
+    expect(fitGridCellIsTruncated(row: 0, column: 0), isTrue);
   });
 
   testWidgets('renders empty state with no rows', (tester) async {
@@ -222,12 +219,12 @@ void main() {
     );
 
     expect(tester.takeException(), isNull);
-    expectFitGridCell(tester, 'Person 0', row: 0, column: 0);
+    expect(fitGridCellText(row: 0, column: 0), 'Person 0');
 
     // The real assertion: in RTL the first column belongs at the trailing
     // (right) edge, not the left. Rendering without throwing would not catch a
     // grid that simply ignored the text direction.
-    final section = fitGridSection(tester);
+    final section = fitGridSection();
     expect(section.columnAtOffset(section.size.width - 2), 0);
     expect(section.columnAtOffset(2), section.columnLayout.length - 1);
   });
@@ -246,7 +243,7 @@ void main() {
       ),
     );
 
-    final section = fitGridSection(tester);
+    final section = fitGridSection();
     final topLeft = tester.getTopLeft(find.byType(FitGridSection));
     // Third row down, comfortably inside it.
     await tester.tapAt(
@@ -296,8 +293,8 @@ void main() {
     // takes up its share of the width and is skipped by the text pass, while
     // its neighbour still paints normally. Instantiating the builder itself
     // comes with virtualized overlay children.
-    expectFitGridCell(tester, 'Person 0', row: 0, column: 0);
-    expect(fitGridColumnWidth(tester, 'action'), greaterThan(0));
+    expect(fitGridCellText(row: 0, column: 0), 'Person 0');
+    expect(fitGridColumnWidth('action'), greaterThan(0));
     expect(tester.takeException(), isNull);
   });
 }

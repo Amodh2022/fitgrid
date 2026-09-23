@@ -122,13 +122,13 @@ void main() {
         _grid(rowHeight: const FitGridRowHeight.contentSized()),
       );
 
-      final oneLine = fitGridRowHeight(tester, 0);
-      final wrapped = fitGridRowHeight(tester, 1);
+      final oneLine = fitGridRowHeight(0);
+      final wrapped = fitGridRowHeight(1);
 
       expect(wrapped, greaterThan(oneLine));
       // Rows alternate short and long, so heights alternate too.
-      expect(fitGridRowHeight(tester, 2), oneLine);
-      expect(fitGridRowHeight(tester, 3), wrapped);
+      expect(fitGridRowHeight(2), oneLine);
+      expect(fitGridRowHeight(3), wrapped);
     });
 
     testWidgets('offsets accumulate the real heights', (tester) async {
@@ -136,13 +136,10 @@ void main() {
         _grid(rowHeight: const FitGridRowHeight.contentSized()),
       );
 
-      expect(fitGridRowOffset(tester, 0), 0);
+      expect(fitGridRowOffset(0), 0);
       expect(
-        fitGridRowOffset(tester, 2),
-        closeTo(
-          fitGridRowHeight(tester, 0) + fitGridRowHeight(tester, 1),
-          0.01,
-        ),
+        fitGridRowOffset(2),
+        closeTo(fitGridRowHeight(0) + fitGridRowHeight(1), 0.01),
       );
     });
 
@@ -153,8 +150,8 @@ void main() {
 
       // The short row wants less than 40 and the wrapped one more than 60;
       // both land on their clamp.
-      expect(fitGridRowHeight(tester, 0), 40);
-      expect(fitGridRowHeight(tester, 1), 60);
+      expect(fitGridRowHeight(0), 40);
+      expect(fitGridRowHeight(1), 60);
     });
 
     testWidgets('costs nothing when no column can wrap', (tester) async {
@@ -162,7 +159,7 @@ void main() {
         _grid(rowHeight: const FitGridRowHeight.contentSized(), maxLines: 1),
       );
 
-      final section = fitGridSection(tester);
+      final section = fitGridSection();
       expect(
         section.rowMetrics.isUniform,
         isTrue,
@@ -179,7 +176,7 @@ void main() {
         ),
       );
 
-      final section = fitGridSection(tester);
+      final section = fitGridSection();
       final topLeft = tester.getTopLeft(find.byType(FitGridSection));
       // Row 3 sits behind two rows of unequal height, so dividing by a single
       // row height would land on the wrong one.
@@ -201,8 +198,8 @@ void main() {
 
       // Rows differ in height, so the window is found by binary search rather
       // than division — but it is still a window.
-      expect(fitGridLaidOutRowCount(tester), lessThan(40));
-      expect(fitGridRowCount(tester), 2000);
+      expect(fitGridLaidOutRowCount(), lessThan(40));
+      expect(fitGridRowCount(), 2000);
     });
   });
 }

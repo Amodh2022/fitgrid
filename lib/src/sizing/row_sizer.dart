@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import '../model/fitgrid_column.dart';
 import '../model/row_height.dart';
+import '../model/rows_view.dart';
 import '../theme/fitgrid_theme.dart';
 import 'column_layout.dart';
 import 'row_metrics.dart';
@@ -43,7 +44,7 @@ class FitGridRowSizer {
   FitGridRowMetrics resolve<T>({
     required FitGridRowHeight? policy,
     required List<FitGridColumn<T>> columns,
-    required List<T> rows,
+    required FitGridRowsView<T> rows,
     required FitGridColumnLayout layout,
     required FitGridThemeData theme,
     required TextDirection textDirection,
@@ -77,7 +78,7 @@ class FitGridRowSizer {
   FitGridRowMetrics _measure<T>({
     required FitGridContentRowHeight policy,
     required List<FitGridColumn<T>> columns,
-    required List<T> rows,
+    required FitGridRowsView<T> rows,
     required FitGridColumnLayout layout,
     required FitGridThemeData theme,
     required TextDirection textDirection,
@@ -121,7 +122,11 @@ class FitGridRowSizer {
 
     final heights = List<double>.filled(rows.length, singleLine);
     for (var r = 0; r < rows.length; r++) {
-      final row = rows[r];
+      final row = rows.rowAt(r);
+      // A row that has not arrived yet occupies one line. Guessing taller would
+      // make the content jump downwards as the page loads; guessing shorter
+      // would make it jump up. One line is the honest placeholder.
+      if (row == null) continue;
       var tallest = lineHeight;
       for (final (column, available) in wrapping) {
         final text = column.value(row);

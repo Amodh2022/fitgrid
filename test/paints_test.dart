@@ -34,12 +34,8 @@ void main() {
     // Every other test asserts geometry, and all of them would still pass if
     // the text pass never ran. This is the one that would not: a cell painter
     // is created and laid out only when paint() actually reaches that cell.
-    expect(
-      fitGridSection(tester).paintedCellCount,
-      6,
-      reason: '3 rows x 2 columns',
-    );
-    expect(fitGridCellIsTruncated(tester, row: 0, column: 0), isFalse);
+    expect(fitGridSection().paintedCellCount, 6, reason: '3 rows x 2 columns');
+    expect(fitGridCellIsTruncated(row: 0, column: 0), isFalse);
   });
 
   testWidgets('paints cells for the window, not the dataset', (tester) async {
@@ -48,22 +44,22 @@ void main() {
 
     // 500 rows x 2 columns is 1000 cells. Only the windowed ones may ever be
     // laid out, so the painter count has to track the viewport instead.
-    final window = fitGridLaidOutRowCount(tester);
+    final window = fitGridLaidOutRowCount();
     expect(window, lessThan(30));
-    expect(fitGridSection(tester).paintedCellCount, window * 2);
+    expect(fitGridSection().paintedCellCount, window * 2);
   });
 
   testWidgets('prunes painters for rows that scrolled away', (tester) async {
     await tester.pumpWidget(_grid(5000, height: 200));
     await tester.pump();
-    final before = fitGridSection(tester).paintedCellCount;
+    final before = fitGridSection().paintedCellCount;
 
     await tester.drag(find.byType(FitGrid<_Row>), const Offset(0, -20000));
     await tester.pump();
 
     // Without pruning the cache would simply grow for the length of the
     // scroll, which is the quiet way a painted grid becomes a memory leak.
-    expect(fitGridSection(tester).firstVisibleRow, greaterThan(100));
-    expect(fitGridSection(tester).paintedCellCount, before);
+    expect(fitGridSection().firstVisibleRow, greaterThan(100));
+    expect(fitGridSection().paintedCellCount, before);
   });
 }

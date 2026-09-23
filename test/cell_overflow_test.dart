@@ -54,8 +54,8 @@ void main() {
       ),
     );
 
-    final rowHeight = fitGridRowHeight(tester, 1);
-    final textHeight = fitGridPaintedTextHeight(tester, row: 1, column: 0)!;
+    final rowHeight = fitGridRowHeight(1);
+    final textHeight = fitGridPaintedTextHeight(row: 1, column: 0)!;
 
     expect(rowHeight, 60, reason: 'the max clamp should bind');
     expect(
@@ -63,7 +63,7 @@ void main() {
       lessThanOrEqualTo(rowHeight),
       reason: 'text taller than its row would paint over the rows either side',
     );
-    expect(fitGridCellIsTruncated(tester, row: 1, column: 0), isTrue);
+    expect(fitGridCellIsTruncated(row: 1, column: 0), isTrue);
   });
 
   testWidgets('a fixed row height caps a wrapping column too', (tester) async {
@@ -71,10 +71,10 @@ void main() {
       _grid(rowHeight: const FitGridRowHeight.fixed(44), maxLines: 6),
     );
 
-    final textHeight = fitGridPaintedTextHeight(tester, row: 1, column: 0)!;
+    final textHeight = fitGridPaintedTextHeight(row: 1, column: 0)!;
 
     expect(textHeight, lessThanOrEqualTo(44));
-    expect(fitGridCellIsTruncated(tester, row: 1, column: 0), isTrue);
+    expect(fitGridCellIsTruncated(row: 1, column: 0), isTrue);
   });
 
   testWidgets('a cell that fits is left alone', (tester) async {
@@ -82,10 +82,10 @@ void main() {
       _grid(rowHeight: const FitGridRowHeight.contentSized(), maxLines: 4),
     );
 
-    expect(fitGridCellIsTruncated(tester, row: 0, column: 0), isFalse);
+    expect(fitGridCellIsTruncated(row: 0, column: 0), isFalse);
     expect(
-      fitGridPaintedTextHeight(tester, row: 0, column: 0),
-      lessThanOrEqualTo(fitGridRowHeight(tester, 0)),
+      fitGridPaintedTextHeight(row: 0, column: 0),
+      lessThanOrEqualTo(fitGridRowHeight(0)),
     );
   });
 
@@ -99,13 +99,13 @@ void main() {
       ),
     );
 
-    final oneLine = fitGridPaintedTextHeight(tester, row: 0, column: 0)!;
-    final capped = fitGridPaintedTextHeight(tester, row: 1, column: 0)!;
+    final oneLine = fitGridPaintedTextHeight(row: 0, column: 0)!;
+    final capped = fitGridPaintedTextHeight(row: 1, column: 0)!;
 
     // Capped, but not back down to a single line — the point of wrapping is
     // that the row spends the height it was given.
     expect(capped, greaterThan(oneLine * 2));
-    expect(capped, lessThanOrEqualTo(fitGridRowHeight(tester, 1)));
+    expect(capped, lessThanOrEqualTo(fitGridRowHeight(1)));
   });
 
   testWidgets('a clip-overflow cell is clipped, not spilled', (tester) async {
@@ -118,8 +118,8 @@ void main() {
     );
 
     expect(
-      fitGridPaintedTextHeight(tester, row: 1, column: 0),
-      lessThanOrEqualTo(fitGridRowHeight(tester, 1)),
+      fitGridPaintedTextHeight(row: 1, column: 0),
+      lessThanOrEqualTo(fitGridRowHeight(1)),
     );
     expect(tester.takeException(), isNull);
   });

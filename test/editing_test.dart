@@ -37,7 +37,7 @@ Widget _host(Widget child) => MaterialApp(
 
 /// Centre of a cell, in global coordinates.
 Offset _cellCentre(WidgetTester tester, int row, int column) {
-  final section = fitGridSection(tester);
+  final section = fitGridSection();
   final origin = tester.getTopLeft(find.byType(FitGridSection));
   final layout = section.columnLayout;
   return origin +
@@ -154,7 +154,7 @@ void main() {
 
     expect(harness.commits, <String>['name:2=Renamed']);
     expect(harness.controller.editing.isEditing, isFalse);
-    expectFitGridCell(tester, 'Renamed', row: 2, column: 0);
+    expect(fitGridCellText(row: 2, column: 0), 'Renamed');
   });
 
   testWidgets('Escape abandons the edit', (tester) async {
@@ -168,7 +168,7 @@ void main() {
 
     expect(harness.commits, isEmpty);
     expect(find.byType(TextField), findsNothing);
-    expectFitGridCell(tester, 'Person 3', row: 3, column: 0);
+    expect(fitGridCellText(row: 3, column: 0), 'Person 3');
   });
 
   testWidgets('a rejected value keeps the editor open with a message', (
@@ -215,7 +215,7 @@ void main() {
   ) async {
     await tester.pumpWidget(grid(trigger: FitGridEditTrigger.singleTap));
 
-    final before = fitGridPaintedTextHeight(tester, row: 1, column: 0);
+    final before = fitGridPaintedTextHeight(row: 1, column: 0);
     expect(before, isNotNull);
 
     await tester.tapAt(_cellCentre(tester, 1, 0));
@@ -223,7 +223,7 @@ void main() {
 
     // The cell is skipped by the text pass, so its painter is no longer
     // refreshed — the editor is the only thing drawing there.
-    expect(fitGridSection(tester).editingCell, (1, 0));
+    expect(fitGridSection().editingCell, (1, 0));
   });
 
   testWidgets('clicking away commits, or cancels when told to', (tester) async {
@@ -336,6 +336,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(TextField), findsNothing);
-    expect(fitGridSection(tester).editingCell, (-1, -1));
+    expect(fitGridSection().editingCell, (-1, -1));
   });
 }

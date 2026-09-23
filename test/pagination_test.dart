@@ -126,13 +126,13 @@ void main() {
         ),
       );
 
-      expect(fitGridRowCount(tester), 25);
-      expectFitGridCell(tester, 'Person 0', row: 0, column: 0);
+      expect(fitGridRowCount(), 25);
+      expect(fitGridCellText(row: 0, column: 0), 'Person 0');
 
       controller.pagination.next();
       await tester.pump();
 
-      expectFitGridCell(tester, 'Person 25', row: 0, column: 0);
+      expect(fitGridCellText(row: 0, column: 0), 'Person 25');
       expect(controller.pagination.pageCount, 40);
     });
 
@@ -162,11 +162,11 @@ void main() {
         ),
       );
 
-      final onPageOne = fitGridColumnWidth(tester, 'name');
+      final onPageOne = fitGridColumnWidth('name');
       controller.pagination.last();
       await tester.pump();
 
-      expect(fitGridColumnWidth(tester, 'name'), onPageOne);
+      expect(fitGridColumnWidth('name'), onPageOne);
     });
 
     testWidgets('taps and selection speak in global row indices', (
@@ -190,7 +190,7 @@ void main() {
       controller.pagination.next();
       await tester.pump();
 
-      final section = fitGridSection(tester);
+      final section = fitGridSection();
       final topLeft = tester.getTopLeft(find.byType(FitGridSection));
       await tester.tapAt(
         topLeft +
@@ -216,7 +216,7 @@ void main() {
 
       controller.pagination.next();
       await tester.pump();
-      expectFitGridCell(tester, 'Person 10', row: 0, column: 0);
+      expect(fitGridCellText(row: 0, column: 0), 'Person 10');
 
       controller.toggleSort('name');
       await tester.pump();
@@ -224,7 +224,7 @@ void main() {
       // Still page two, now of the sorted order — string sort, so 'Person 18'
       // lands where 'Person 10' was.
       expect(controller.pagination.pageIndex, 1);
-      expect(fitGridRowCount(tester), 10);
+      expect(fitGridRowCount(), 10);
     });
 
     testWidgets('the pager drives the grid', (tester) async {
@@ -246,7 +246,7 @@ void main() {
       await tester.tap(find.byTooltip('Last page'));
       await tester.pump();
       expect(find.text('51–60 of 60'), findsOneWidget);
-      expect(fitGridRowCount(tester), 10);
+      expect(fitGridRowCount(), 10);
     });
 
     testWidgets('a custom pager replaces the built-in one', (tester) async {
@@ -278,7 +278,7 @@ void main() {
       await tester.pumpWidget(_host(FitGrid<_Row>(controller: controller)));
 
       expect(find.byType(FitGridPager), findsNothing);
-      expect(fitGridRowCount(tester), 60);
+      expect(fitGridRowCount(), 60);
     });
   });
 }

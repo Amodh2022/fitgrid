@@ -31,3 +31,17 @@ enum FitGridDensity { compact, standard, comfortable }
 /// Sort state of a single column. Sorting is tri-state: the third tap on a
 /// header clears the sort rather than cycling back to ascending.
 enum FitGridSortDirection { ascending, descending, none }
+
+/// How many rows the user may select by pointer or keyboard.
+enum FitGridSelectionMode {
+  /// Rows cannot be selected. Taps still reach `onRowTap`.
+  none,
+
+  /// One row at a time. A second click on the same row with the toggle
+  /// modifier clears it.
+  single,
+
+  /// Any number of rows, with the toggle and range modifiers the platform's
+  /// other tables use.
+  multiple,
+}

@@ -4,6 +4,8 @@ import '../model/enums.dart';
 import '../model/fitgrid_column.dart';
 import '../sizing/column_order.dart';
 import 'fitgrid_editing.dart';
+import 'fitgrid_filter.dart';
+import 'fitgrid_focus.dart';
 import 'fitgrid_pagination.dart';
 
 /// Rows, and the ordering applied to them.
@@ -16,12 +18,25 @@ class FitGridDataState<T> extends ChangeNotifier {
 
   List<T> _rows;
   List<T>? _view;
+  FitGridRowPredicate<T>? _filter;
 
   /// The rows as supplied, in their original order.
   List<T> get rows => List<T>.unmodifiable(_rows);
 
   set rows(List<T> value) {
     _rows = List<T>.of(value);
+    _view = null;
+    notifyListeners();
+  }
+
+  /// Narrows the rows before they are sorted, or null to keep all of them.
+  ///
+  /// Set by the controller from the filter state rather than by a host
+  /// directly, so that "what is on screen" has exactly one derivation.
+  FitGridRowPredicate<T>? get filter => _filter;
+  set filter(FitGridRowPredicate<T>? value) {
+    if (identical(_filter, value)) return;
+    _filter = value;
     _view = null;
     notifyListeners();
   }
@@ -70,9 +85,20 @@ class FitGridDataState<T> extends ChangeNotifier {
   }
 
   List<T> _buildView() {
+    final filter = _filter;
     final comparator = _comparator;
-    if (comparator == null) return _rows;
-    final sorted = List<T>.of(_rows);
+    // An unfiltered, unsorted grid hands back the original list rather than a
+    // copy of it: downstream caches are keyed on its identity, so copying here
+    // would invalidate the column measurement on every build.
+    if (filter == null && comparator == null) return _rows;
+    final base = filter == null
+        ? _rows
+        : <T>[
+            for (final row in _rows)
+              if (filter(row)) row,
+          ];
+    if (comparator == null) return base;
+    final sorted = List<T>.of(base);
     final sign = _sortDirection == FitGridSortDirection.descending ? -1 : 1;
     sorted.sort((a, b) => sign * comparator(a, b));
     return sorted;
@@ -193,13 +219,62 @@ class FitGridColumnState<T> extends ChangeNotifier {
   }
 }
 
-/// Which rows are selected.
+/// Which rows are selected, and how many may be.
+///
+/// Indices are into the full row list, never into the page: a selection that
+/// reattached to whatever now sits in position 3 after a page turn is worse
+/// than no selection at all.
 class FitGridSelectionState extends ChangeNotifier {
   final Set<int> _selected = <int>{};
 
+  int _revision = 0;
+
+  /// Bumped on every change. The grid folds it into the cache key for painted
+  /// cells, because a checkbox glyph is part of a cell's spec and a `Set` has
+  /// no cheap identity to compare instead.
+  int get revision => _revision;
+
+  @override
+  void notifyListeners() {
+    _revision++;
+    super.notifyListeners();
+  }
+
+  FitGridSelectionMode _mode = FitGridSelectionMode.none;
+
+  /// Whether, and how many, rows the user may select by pointer or keyboard.
+  /// Programmatic selection is not gated by this — a host that sets a
+  /// selection has said what it wants.
+  FitGridSelectionMode get mode => _mode;
+  set mode(FitGridSelectionMode value) {
+    if (_mode == value) return;
+    _mode = value;
+    if (value == FitGridSelectionMode.none) {
+      _selected.clear();
+      _anchor = null;
+    } else if (value == FitGridSelectionMode.single && _selected.length > 1) {
+      final keep = _selected.last;
+      _selected
+        ..clear()
+        ..add(keep);
+    }
+    notifyListeners();
+  }
+
+  /// Where the last plain click landed. Shift-click extends from here, which is
+  /// what makes a range selection feel like one in every other table.
+  int? _anchor;
+  int? get anchor => _anchor;
+
   Set<int> get selected => Set<int>.unmodifiable(_selected);
 
+  /// The selected indices in ascending order — the order a copy or an export
+  /// has to emit them in.
+  List<int> get sorted => _selected.toList()..sort();
+
   bool get isEmpty => _selected.isEmpty;
+
+  bool get isNotEmpty => _selected.isNotEmpty;
 
   int get length => _selected.length;
 
@@ -207,18 +282,67 @@ class FitGridSelectionState extends ChangeNotifier {
 
   void toggle(int rowIndex) {
     if (!_selected.remove(rowIndex)) _selected.add(rowIndex);
+    _anchor = rowIndex;
     notifyListeners();
   }
 
   void select(Iterable<int> rowIndices, {bool replace = true}) {
     if (replace) _selected.clear();
     _selected.addAll(rowIndices);
+    _anchor = _selected.isEmpty ? null : _selected.last;
     notifyListeners();
   }
 
+  /// Selects everything between [from] and [to] inclusive, in either order.
+  void selectRange(int from, int to, {bool replace = true}) {
+    if (replace) _selected.clear();
+    final low = from < to ? from : to;
+    final high = from < to ? to : from;
+    for (var i = low; i <= high; i++) {
+      _selected.add(i);
+    }
+    _anchor = from;
+    notifyListeners();
+  }
+
+  /// Applies a pointer or keyboard selection gesture, honouring [mode] and the
+  /// modifier keys.
+  ///
+  /// The three behaviours — replace, toggle, extend — are the ones every
+  /// desktop table has, and putting them here rather than in the gesture
+  /// handler is what lets the keyboard reuse them without reimplementing the
+  /// anchor logic.
+  void applyGesture(
+    int rowIndex, {
+    bool toggleKey = false,
+    bool rangeKey = false,
+  }) {
+    switch (_mode) {
+      case FitGridSelectionMode.none:
+        return;
+      case FitGridSelectionMode.single:
+        if (toggleKey && _selected.contains(rowIndex)) {
+          clear();
+        } else {
+          select(<int>[rowIndex]);
+        }
+      case FitGridSelectionMode.multiple:
+        if (rangeKey && _anchor != null) {
+          final anchor = _anchor!;
+          selectRange(anchor, rowIndex, replace: !toggleKey);
+          _anchor = anchor;
+        } else if (toggleKey) {
+          toggle(rowIndex);
+        } else {
+          select(<int>[rowIndex]);
+        }
+    }
+  }
+
   void clear() {
-    if (_selected.isEmpty) return;
+    if (_selected.isEmpty && _anchor == null) return;
     _selected.clear();
+    _anchor = null;
     notifyListeners();
   }
 }
@@ -238,12 +362,28 @@ class FitGridController<T> {
   FitGridController({
     List<T> rows = const [],
     List<FitGridColumn<T>> columns = const [],
+    FitGridSelectionMode selectionMode = FitGridSelectionMode.none,
   }) : data = FitGridDataState<T>(rows: rows),
        columns = FitGridColumnState<T>(columns: columns) {
+    selection.mode = selectionMode;
     pagination.rowCount = rows.length;
     // The page must survive a sort but not a resize of the dataset, so the
     // pager follows the data rather than being driven from the widget.
     data.addListener(() => pagination.rowCount = data.length);
+    // Filtering is derived, not stored twice: the filter state holds the user's
+    // intent, and this is the one place it turns into a predicate the data
+    // state can apply. Columns take part because the search reads them.
+    filter.addListener(_applyFilter);
+    this.columns.addListener(_applyFilter);
+  }
+
+  void _applyFilter() {
+    final next = filter.buildPredicate(columns.visible);
+    // A null predicate both times means nothing is filtered and nothing needs
+    // re-deriving; the identity check in the setter cannot see that, because a
+    // fresh closure is a fresh object every time.
+    if (next == null && data.filter == null) return;
+    data.filter = next;
   }
 
   /// Rows and their ordering.
@@ -262,6 +402,36 @@ class FitGridController<T> {
   /// [FitGridPaginationState.enabled] is set here.
   final FitGridPaginationState pagination = FitGridPaginationState();
 
+  /// Which cell the keyboard is on.
+  final FitGridFocusState focus = FitGridFocusState();
+
+  /// The active search text and column filters.
+  final FitGridFilterState<T> filter = FitGridFilterState<T>();
+
+  void Function(int rowIndex, String? columnId, double padding)? _reveal;
+
+  /// Wires the controller to a mounted grid so [scrollTo] has something to
+  /// scroll. Called by [FitGrid] as it mounts and unmounts; a host never needs
+  /// to call it.
+  void attachViewport(
+    void Function(int rowIndex, String? columnId, double padding)? reveal,
+  ) => _reveal = reveal;
+
+  /// Brings a row — and optionally a column — into view.
+  ///
+  /// Takes a global row index, like everything else that speaks in rows. Under
+  /// pagination it turns the page first, because a row on page seven cannot be
+  /// scrolled to from page one.
+  ///
+  /// Does nothing when no grid is mounted, rather than throwing: a controller
+  /// outlives the widget that uses it, and a host asking to scroll during a
+  /// rebuild should not have to guard against that.
+  void scrollTo(int rowIndex, {String? columnId, double padding = 0}) {
+    if (rowIndex < 0 || rowIndex >= data.length) return;
+    if (pagination.enabled) pagination.revealRow(rowIndex);
+    _reveal?.call(rowIndex, columnId, padding);
+  }
+
   /// Cycles the sort on a column: ascending, descending, unsorted.
   void toggleSort(String columnId) {
     final column = columns.byId(columnId);
@@ -269,11 +439,30 @@ class FitGridController<T> {
     data.sort(columnId, data.nextDirectionFor(columnId), column.compare);
   }
 
+  /// Moves a column so that it sits where [targetId] is now.
+  ///
+  /// Reordering speaks in ids rather than indices because the indices a header
+  /// drag produces are into the *visible* columns, and the list being mutated
+  /// includes the hidden ones.
+  void moveColumnBefore(String movedId, String targetId) {
+    if (movedId == targetId) return;
+    final all = columns.columns;
+    final from = all.indexWhere((column) => column.id == movedId);
+    final to = all.indexWhere((column) => column.id == targetId);
+    if (from < 0 || to < 0) return;
+    columns.move(from, to);
+  }
+
   void dispose() {
+    _reveal = null;
+    filter.removeListener(_applyFilter);
+    columns.removeListener(_applyFilter);
     data.dispose();
     columns.dispose();
     selection.dispose();
     pagination.dispose();
     editing.dispose();
+    focus.dispose();
+    filter.dispose();
   }
 }
