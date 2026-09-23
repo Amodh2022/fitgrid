@@ -27,6 +27,12 @@ export 'src/controller/fitgrid_pagination.dart' show FitGridPaginationState;
 export 'src/controller/fitgrid_saved_state.dart' show FitGridSavedState;
 export 'src/controller/fitgrid_range.dart'
     show FitGridCellRange, FitGridCellRangeState;
+export 'src/model/cell_visual.dart'
+    show
+        FitGridBarVisual,
+        FitGridCellVisual,
+        FitGridProgressVisual,
+        FitGridSparklineVisual;
 export 'src/model/column_filter.dart'
     show
         FitGridColumnFilter,

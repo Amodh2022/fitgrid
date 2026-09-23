@@ -3,6 +3,78 @@ import 'package:flutter/widgets.dart';
 
 import '../model/enums.dart';
 
+/// Which painted chart a cell carries.
+enum FitGridVisualKind { bar, progress, sparkline }
+
+/// A chart painted into a cell, already reduced to geometry: fractions of the
+/// cell's content box, so the render layer needs nothing but the box to draw
+/// it and the spec compares cheaply.
+@immutable
+class FitGridCellVisualSpec {
+  /// A bar spanning [from] to [to] across the cell — from the zero line to
+  /// the value, so a negative value extends the other way.
+  const FitGridCellVisualSpec.bar({
+    required this.from,
+    required this.to,
+    this.negative = false,
+    this.color,
+  }) : kind = FitGridVisualKind.bar,
+       points = const <double>[],
+       filled = false;
+
+  /// A progress track, filled to [to].
+  const FitGridCellVisualSpec.progress({required this.to, this.color})
+    : kind = FitGridVisualKind.progress,
+      from = 0,
+      negative = false,
+      points = const <double>[],
+      filled = false;
+
+  /// A line through [points], each 0 at the bottom of the cell and 1 at the
+  /// top, spaced evenly across it.
+  const FitGridCellVisualSpec.sparkline({
+    required this.points,
+    this.filled = false,
+    this.color,
+  }) : kind = FitGridVisualKind.sparkline,
+       from = 0,
+       to = 0,
+       negative = false;
+
+  final FitGridVisualKind kind;
+  final double from;
+  final double to;
+  final bool negative;
+  final List<double> points;
+  final bool filled;
+
+  /// Null follows the theme's chart colour.
+  final Color? color;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FitGridCellVisualSpec &&
+          other.kind == kind &&
+          other.from == from &&
+          other.to == to &&
+          other.negative == negative &&
+          other.filled == filled &&
+          other.color == color &&
+          listEquals(other.points, points);
+
+  @override
+  int get hashCode => Object.hash(
+    kind,
+    from,
+    to,
+    negative,
+    filled,
+    color,
+    Object.hashAll(points),
+  );
+}
+
 /// Everything the render layer needs to paint one text cell.
 ///
 /// Resolved at build time, because painting happens where there is no
@@ -22,6 +94,7 @@ class FitGridCellSpec {
     this.highlights = const <int>[],
     this.semanticLabel,
     this.placeholder = false,
+    this.visual,
   });
 
   /// A skeleton bar standing in for content that is on its way — a row a data
@@ -82,6 +155,9 @@ class FitGridCellSpec {
   /// Whether this cell paints a skeleton bar instead of text.
   final bool placeholder;
 
+  /// A chart painted beneath the text, or null.
+  final FitGridCellVisualSpec? visual;
+
   bool get hasHighlights => highlights.isNotEmpty;
 
   @override
@@ -98,6 +174,7 @@ class FitGridCellSpec {
           other.iconSize == iconSize &&
           other.semanticLabel == semanticLabel &&
           other.placeholder == placeholder &&
+          other.visual == visual &&
           listEquals(other.highlights, highlights);
 
   @override
@@ -112,6 +189,7 @@ class FitGridCellSpec {
     iconSize,
     semanticLabel,
     placeholder,
+    visual,
     Object.hashAll(highlights),
   );
 

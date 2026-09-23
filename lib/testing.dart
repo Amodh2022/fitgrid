@@ -28,7 +28,8 @@ import 'package:flutter/widgets.dart';
 import 'src/render/cell_spec.dart';
 import 'src/render/render_fitgrid_section.dart';
 
-export 'src/render/cell_spec.dart' show FitGridCellSpec;
+export 'src/render/cell_spec.dart'
+    show FitGridCellSpec, FitGridCellVisualSpec, FitGridVisualKind;
 export 'src/render/render_fitgrid_section.dart' show RenderFitGridSection;
 
 /// Every painted grid section currently mounted, in tree order.

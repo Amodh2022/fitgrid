@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import 'cell_visual.dart';
 import 'column_filter.dart';
 import 'column_width.dart';
 import 'enums.dart';
@@ -93,6 +94,7 @@ class FitGridColumn<T> {
     this.tooltip,
     this.editor,
     this.filter,
+    this.visual,
   }) : assert(maxLines == null || maxLines > 0, 'maxLines must be positive');
 
   /// Stable identity for this column. Used as the key for widths, sort state,
@@ -212,6 +214,12 @@ class FitGridColumn<T> {
   /// predicate set through `FitGridFilterState.setColumnFilter` still applies.
   final FitGridFilterSpec<T>? filter;
 
+  /// A chart painted into each cell: a data bar, a progress track or a
+  /// sparkline. See [FitGridCellVisual].
+  ///
+  /// Charts are not measured, so give a sparkline column a fixed width.
+  final FitGridCellVisual<T>? visual;
+
   /// Whether a cell in this column can be opened for editing.
   bool get isEditable => editor != null;
 
@@ -258,6 +266,7 @@ class FitGridColumn<T> {
     String? tooltip,
     FitGridEditor<T>? editor,
     FitGridFilterSpec<T>? filter,
+    FitGridCellVisual<T>? visual,
   }) {
     return FitGridColumn<T>(
       id: id ?? this.id,
@@ -288,6 +297,7 @@ class FitGridColumn<T> {
       tooltip: tooltip ?? this.tooltip,
       editor: editor ?? this.editor,
       filter: filter ?? this.filter,
+      visual: visual ?? this.visual,
     );
   }
 

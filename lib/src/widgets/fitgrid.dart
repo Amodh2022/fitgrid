@@ -542,6 +542,9 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   FitGridRowsView<T>? _skeleton;
   Object? _skeletonKey;
 
+  Map<String, (num, num)>? _visualRanges;
+  Object? _visualRangesKey;
+
   @override
   void initState() {
     super.initState();
@@ -773,6 +776,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     ];
 
     final canReorder = _canReorderRows;
+    final visualRanges = _resolveVisualRanges(columns, measurable);
     final pinsHeaders =
         widget.stickyGroupHeaders &&
         controller.grouping.groups.isNotEmpty &&
@@ -882,7 +886,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         );
       }
 
-      final text = column.value(row);
+      final visual = column.visual;
+      final text = visual == null || visual.showText ? column.value(row) : '';
       final disclosure = columnIndex == 0 && (line?.expandable ?? false)
           ? (line!.expanded ? theme.expandedIcon : theme.collapsedIcon)
           : null;
@@ -896,7 +901,12 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         iconColor: disclosure != null
             ? theme.headerForeground
             : column.iconColor?.call(row, globalRow),
-        semanticLabel: column.semanticValue?.call(row),
+        // A chart with its text hidden still says its value to a screen
+        // reader.
+        semanticLabel:
+            column.semanticValue?.call(row) ??
+            (text.isEmpty && visual != null ? column.value(row) : null),
+        visual: visual?.resolve(row, visualRanges[column.id]),
         // Matches are computed only for the columns the search actually looks
         // at, and only while there is a query — a grid with an empty search box
         // pays nothing for having one.
@@ -3235,6 +3245,43 @@ class _FitGridState<T> extends State<FitGrid<T>> {
           widget.detailRowHeight;
     }
     return any ? FitGridRowMetrics.measured(heights) : base;
+  }
+
+  /// The data range of each column whose chart needs one, over the rows the
+  /// columns are measured against. Memoized on those rows, so it is one pass
+  /// per change to the data rather than one per frame.
+  Map<String, (num, num)> _resolveVisualRanges(
+    List<FitGridColumn<T>> columns,
+    List<T> rows,
+  ) {
+    final wanting = <FitGridColumn<T>>[
+      for (final column in columns)
+        if (column.visual?.needsRange ?? false) column,
+    ];
+    if (wanting.isEmpty) return const <String, (num, num)>{};
+    final key = Object.hash(
+      identityHashCode(rows),
+      rows.length,
+      identityHashCode(columns),
+    );
+    final cached = _visualRanges;
+    if (cached != null && _visualRangesKey == key) return cached;
+
+    final ranges = <String, (num, num)>{};
+    for (final column in wanting) {
+      num? low;
+      num? high;
+      for (final row in rows) {
+        final value = column.visual!.rangeValueOf(row);
+        if (value == null) continue;
+        if (low == null || value < low) low = value;
+        if (high == null || value > high) high = value;
+      }
+      if (low != null && high != null) ranges[column.id] = (low, high);
+    }
+    _visualRanges = ranges;
+    _visualRangesKey = key;
+    return ranges;
   }
 
   /// Header room every column needs beyond its label and sort icon.

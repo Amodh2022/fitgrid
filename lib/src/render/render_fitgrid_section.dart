@@ -1320,6 +1320,21 @@ class RenderFitGridSection extends RenderBox
     final origin = Offset(textLeft, top + (height - cell.painter.height) / 2);
     final cellRect = Rect.fromLTWH(left, top, width, height);
 
+    final visual = spec.visual;
+    if (visual != null) {
+      _paintVisual(
+        canvas,
+        visual,
+        Rect.fromLTRB(
+          cellRect.left + padding.left,
+          cellRect.top + padding.top,
+          cellRect.right - padding.right,
+          cellRect.bottom - padding.bottom,
+        ),
+        hasText: spec.text.isNotEmpty,
+      );
+    }
+
     // A cell that still does not fit — one line taller than the whole row, say
     // — is clipped to its own box rather than allowed to paint over its
     // neighbours. The save/restore is skipped in the overwhelmingly common case
@@ -1355,6 +1370,100 @@ class RenderFitGridSection extends RenderBox
     }
     if (needsClip) canvas.restore();
     _byCell[_cellKey(row, column)] = cell;
+  }
+
+  /// A chart in a cell's content box.
+  ///
+  /// Bars and tracks grow from the leading edge, so under RTL they grow from
+  /// the right. A sparkline does not mirror: its axis is time, and time runs
+  /// left to right on a chart whatever the script around it.
+  void _paintVisual(
+    Canvas canvas,
+    FitGridCellVisualSpec visual,
+    Rect box, {
+    required bool hasText,
+  }) {
+    if (box.width <= 0 || box.height <= 0) return;
+    final rtl = _textDirection == TextDirection.rtl;
+    final base =
+        visual.color ??
+        (visual.negative
+            ? _theme.effectiveChartNegativeColor
+            : _theme.effectiveChartColor);
+
+    Rect span(double from, double to, double top, double height) {
+      final a = box.left + box.width * (rtl ? 1 - to : from);
+      final b = box.left + box.width * (rtl ? 1 - from : to);
+      return Rect.fromLTRB(a, top, b, top + height);
+    }
+
+    switch (visual.kind) {
+      case FitGridVisualKind.bar:
+        // Translucent, so the value painted over it stays readable.
+        final rect = span(visual.from, visual.to, box.top, box.height);
+        if (rect.width <= 0) return;
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+          Paint()..color = base.withValues(alpha: base.a * 0.35),
+        );
+      case FitGridVisualKind.progress:
+        // With text, a slim track along the bottom leaves the text its line;
+        // alone, a thicker one sits in the middle.
+        final thickness = math.min(box.height, hasText ? 4.0 : 8.0);
+        final top = hasText
+            ? box.bottom - thickness
+            : box.top + (box.height - thickness) / 2;
+        final radius = Radius.circular(thickness / 2);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(span(0, 1, top, thickness), radius),
+          Paint()..color = base.withValues(alpha: base.a * 0.18),
+        );
+        if (visual.to > 0) {
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(span(0, visual.to, top, thickness), radius),
+            Paint()..color = base,
+          );
+        }
+      case FitGridVisualKind.sparkline:
+        final points = visual.points;
+        if (points.length < 2) return;
+        final step = box.width / (points.length - 1);
+        final path = Path();
+        for (var i = 0; i < points.length; i++) {
+          final x = box.left + step * i;
+          final y = box.bottom - points[i] * box.height;
+          if (i == 0) {
+            path.moveTo(x, y);
+          } else {
+            path.lineTo(x, y);
+          }
+        }
+        if (visual.filled) {
+          final area = Path.from(path)
+            ..lineTo(box.right, box.bottom)
+            ..lineTo(box.left, box.bottom)
+            ..close();
+          canvas.drawPath(
+            area,
+            Paint()..color = base.withValues(alpha: base.a * 0.15),
+          );
+        }
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = base
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5
+            ..strokeJoin = StrokeJoin.round
+            ..strokeCap = StrokeCap.round,
+        );
+        // The last point is the one people read, so it gets a dot.
+        canvas.drawCircle(
+          Offset(box.right, box.bottom - points.last * box.height),
+          2.5,
+          Paint()..color = base,
+        );
+    }
   }
 
   /// A skeleton bar where content is on its way.
