@@ -476,45 +476,57 @@ class _HeaderCell<T> extends StatelessWidget {
       ),
     );
 
+    if (onReorder == null || !column.reorderable) {
+      return SizedBox(
+        width: width,
+        child: ClipRect(child: cell),
+      );
+    }
+
+    // Captured by value, not by the variable: the builder below closes over
+    // this, and assigning the drag target back into the same name would make
+    // the header contain itself. That recursion is unbounded and shows up as a
+    // stack overflow rather than as a layout error.
+    final inner = cell;
+
     // Reordering is a header affair end to end: the body's column order is
     // derived from the controller, so a drop here is a single `move` and the
     // painted cells follow on the next build with nothing to animate and
     // nothing to keep in sync.
-    if (onReorder != null && column.reorderable) {
-      cell = DragTarget<String>(
-        onWillAcceptWithDetails: (details) => details.data != column.id,
-        onAcceptWithDetails: (details) => onReorder!(details.data, column.id),
-        builder: (context, candidate, _) => Stack(
-          fit: StackFit.passthrough,
-          children: [
-            Draggable<String>(
-              data: column.id,
-              axis: Axis.horizontal,
-              feedback: _DragFeedback(
-                label: column.label,
-                width: width,
-                theme: theme,
-              ),
-              childWhenDragging: Opacity(opacity: 0.35, child: cell),
-              child: cell,
-            ),
-            if (candidate.isNotEmpty)
-              Positioned.directional(
-                textDirection: Directionality.of(context),
-                start: 0,
-                top: 0,
-                bottom: 0,
-                width: theme.dividerThickness * 3,
-                child: ColoredBox(color: theme.focusOutline),
-              ),
-          ],
-        ),
-      );
-    }
-
     return SizedBox(
       width: width,
-      child: ClipRect(child: cell),
+      child: ClipRect(
+        child: DragTarget<String>(
+          onWillAcceptWithDetails: (details) => details.data != column.id,
+          onAcceptWithDetails: (details) => onReorder!(details.data, column.id),
+          builder: (context, candidate, _) => Stack(
+            fit: StackFit.passthrough,
+            children: [
+              Draggable<String>(
+                data: column.id,
+                axis: Axis.horizontal,
+                feedback: _DragFeedback(
+                  label: column.label,
+                  width: width,
+                  theme: theme,
+                ),
+                childWhenDragging: Opacity(opacity: 0.35, child: inner),
+                child: inner,
+              ),
+              // Where the dropped column would land.
+              if (candidate.isNotEmpty)
+                Positioned.directional(
+                  textDirection: Directionality.of(context),
+                  start: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: theme.dividerThickness * 3,
+                  child: ColoredBox(color: theme.focusOutline),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

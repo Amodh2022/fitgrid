@@ -64,6 +64,9 @@ class _ExamplePageState extends State<ExamplePage> {
   bool _rtl = false;
   bool _wrapNotes = false;
   bool _paginated = false;
+  bool _freeze = false;
+  bool _grouped = false;
+  bool _selectable = true;
 
   @override
   void initState() {
@@ -88,6 +91,8 @@ class _ExamplePageState extends State<ExamplePage> {
       alignment: FitGridAlignment.end,
       sortable: true,
       comparator: (a, b) => a.id.compareTo(b.id),
+      // Pinned to the leading edge, so it stays put while the rest scrolls.
+      freeze: _freeze ? FitGridFreeze.start : FitGridFreeze.none,
       // Ids are uniform, so there is nothing to measure — say so explicitly
       // rather than paying for a measurement that always agrees.
       width: const FitGridColumnWidth.fitHeader(min: 72),
@@ -111,6 +116,9 @@ class _ExamplePageState extends State<ExamplePage> {
       label: 'Department',
       value: (e) => e.department,
       sortable: true,
+      // A glyph per cell, painted by the same painter as the text — not an
+      // `Icon` widget per row.
+      icon: (e, _) => Icons.apartment_outlined,
     ),
     FitGridColumn<Employee>(
       id: 'role',
@@ -129,6 +137,12 @@ class _ExamplePageState extends State<ExamplePage> {
       alignment: FitGridAlignment.end,
       sortable: true,
       comparator: (a, b) => a.salary.compareTo(b.salary),
+      freeze: _freeze ? FitGridFreeze.end : FitGridFreeze.none,
+      // The clipboard and the export want the number, not the formatting.
+      copyValue: (e) => e.salary.toString(),
+      // Computed over the rows on screen, so it agrees with the search.
+      footerLabel: 'Total',
+      aggregate: (rows) => '\$${rows.fold<int>(0, (sum, e) => sum + e.salary)}',
       editor: FitGridEditor<Employee>(
         // The cell paints a formatted string; the editor should not make the
         // user retype the currency symbol and the separators.
@@ -191,6 +205,34 @@ class _ExamplePageState extends State<ExamplePage> {
     _controller.data.rows = generateEmployees(count);
   }
 
+  /// Rebuilds the columns after a flag that lives on them changes.
+  void _rebuildColumns() => _controller.columns.columns = _columns();
+
+  void _setGrouped(bool value) {
+    setState(() => _grouped = value);
+    _controller.grouping.groups = value
+        ? <FitGridGroup<Employee>>[
+            FitGridGroup<Employee>(keyOf: (e) => e.department),
+          ]
+        : const <FitGridGroup<Employee>>[];
+  }
+
+  /// Exports what is on screen — sort, search and column order included.
+  Future<void> _export() async {
+    final selected = _controller.selection.isNotEmpty;
+    final csv = fitGridToCsv(_controller.export(selectedOnly: selected));
+    await Clipboard.setData(ClipboardData(text: csv));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '${selected ? 'Selection' : 'All rows'} copied as CSV '
+          '(${csv.length} characters)',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -232,6 +274,17 @@ class _ExamplePageState extends State<ExamplePage> {
               onRtl: (v) => setState(() => _rtl = v),
               wrapNotes: _wrapNotes,
               onWrapNotes: _setWrapNotes,
+              freeze: _freeze,
+              onFreeze: (v) {
+                setState(() => _freeze = v);
+                _rebuildColumns();
+              },
+              grouped: _grouped,
+              onGrouped: _setGrouped,
+              selectable: _selectable,
+              onSelectable: (v) => setState(() => _selectable = v),
+              onSearch: (q) => _controller.filter.query = q,
+              onExport: _export,
               // Drag a header divider to resize a column, or double-click it to
               // re-fit that one. This does the same to all of them at once.
               onResetWidths: _controller.columns.autoSizeAll,
@@ -250,6 +303,11 @@ class _ExamplePageState extends State<ExamplePage> {
                       ? const FitGridRowHeight.contentSized(min: 40, max: 120)
                       : null,
                   paginated: _paginated,
+                  selectionMode: _selectable
+                      ? FitGridSelectionMode.multiple
+                      : FitGridSelectionMode.none,
+                  showSelectionColumn: _selectable,
+                  reorderableColumns: true,
                 ),
               ),
             ),
@@ -278,6 +336,14 @@ class _Controls extends StatelessWidget {
     required this.onResetWidths,
     required this.paginated,
     required this.onPaginated,
+    required this.freeze,
+    required this.onFreeze,
+    required this.grouped,
+    required this.onGrouped,
+    required this.selectable,
+    required this.onSelectable,
+    required this.onSearch,
+    required this.onExport,
   });
 
   final int rowCount;
@@ -296,6 +362,14 @@ class _Controls extends StatelessWidget {
   final VoidCallback onResetWidths;
   final bool paginated;
   final ValueChanged<bool> onPaginated;
+  final bool freeze;
+  final ValueChanged<bool> onFreeze;
+  final bool grouped;
+  final ValueChanged<bool> onGrouped;
+  final bool selectable;
+  final ValueChanged<bool> onSelectable;
+  final ValueChanged<String> onSearch;
+  final VoidCallback onExport;
 
   @override
   Widget build(BuildContext context) {
@@ -362,10 +436,42 @@ class _Controls extends StatelessWidget {
             selected: paginated,
             onSelected: onPaginated,
           ),
+          FilterChip(
+            label: const Text('Freeze ends'),
+            selected: freeze,
+            onSelected: onFreeze,
+          ),
+          FilterChip(
+            label: const Text('Group by department'),
+            selected: grouped,
+            onSelected: onGrouped,
+          ),
+          FilterChip(
+            label: const Text('Selectable'),
+            selected: selectable,
+            onSelected: onSelectable,
+          ),
+          SizedBox(
+            width: 220,
+            child: TextField(
+              decoration: const InputDecoration(
+                isDense: true,
+                prefixIcon: Icon(Icons.search, size: 18),
+                hintText: 'Search',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: onSearch,
+            ),
+          ),
           OutlinedButton.icon(
             onPressed: onResetWidths,
             icon: const Icon(Icons.straighten_outlined, size: 18),
             label: const Text('Re-fit columns'),
+          ),
+          OutlinedButton.icon(
+            onPressed: onExport,
+            icon: const Icon(Icons.download_outlined, size: 18),
+            label: const Text('Copy as CSV'),
           ),
         ],
       ),

@@ -46,6 +46,22 @@ String _ms(int microseconds) =>
 void main() {
   const viewport = Size(1000, 700);
 
+  // The first widget test in a binding pays for the binding, the font manager
+  // and the first JIT of the whole render pipeline — a couple of hundred
+  // milliseconds that belong to the test framework rather than to the grid.
+  // Paying it here keeps it out of the first row of the table.
+  testWidgets('warm up', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: FitGrid<Row>(rows: makeRows(50), columns: makeColumns()),
+        ),
+      ),
+    );
+    await tester.drag(find.byType(FitGrid<Row>), const Offset(0, -200));
+    await tester.pump();
+  });
+
   for (final count in <int>[1000, 10000, 100000, 1000000]) {
     testWidgets('$count rows', (tester) async {
       await tester.binding.setSurfaceSize(viewport);

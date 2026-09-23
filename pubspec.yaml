@@ -2,7 +2,7 @@ name: fitgrid
 description: >-
   A Flutter data grid that measures your content instead of making you guess
   column widths, and paints cells instead of building a widget for each one.
-version: 0.0.1-dev
+version: 0.1.0-dev
 repository: https://github.com/amodhnadiger/fitgrid
 issue_tracker: https://github.com/amodhnadiger/fitgrid/issues
 
@@ -11,6 +11,7 @@ topics:
   - data-table
   - data-grid
   - performance
+  - accessibility
 
 environment:
   sdk: ^3.9.0

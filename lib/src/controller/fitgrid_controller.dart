@@ -432,7 +432,10 @@ class FitGridController<T> {
   /// outlives the widget that uses it, and a host asking to scroll during a
   /// rebuild should not have to guard against that.
   void scrollTo(int rowIndex, {String? columnId, double padding = 0}) {
-    if (rowIndex < 0 || rowIndex >= data.length) return;
+    if (rowIndex < 0) return;
+    // No upper bound checked here: a grid backed by a [FitGridDataSource] holds
+    // no rows of its own, so `data.length` would be zero and every scroll a
+    // no-op. The grid clamps against the geometry it actually has.
     if (pagination.enabled) pagination.revealRow(rowIndex);
     _reveal?.call(rowIndex, columnId, padding);
   }

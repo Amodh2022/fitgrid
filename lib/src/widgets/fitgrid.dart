@@ -1433,7 +1433,9 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     final render = _sectionKey.currentContext?.findRenderObject();
     if (render is! RenderFitGridSection) return;
 
-    final local = rowIndex - _resolveRows(widget.dataSource).offset;
+    final rows = _resolveRows(widget.dataSource);
+    final local = rows.localIndex(rowIndex);
+    if (local < 0) return;
     final columnIndex = columnId == null
         ? -1
         : render.columnLayout.indexOf(columnId);

@@ -24,6 +24,22 @@ jobs:
           flutter analyze --fatal-infos
           flutter test
 
+  benchmarks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      # Printed, not asserted. A timing gate on a shared runner fails for
+      # reasons that have nothing to do with the code, and a benchmark that
+      # cries wolf gets ignored. The frame benchmark does assert one thing —
+      # that the laid-out row count stays bounded — because that is a
+      # correctness claim rather than a timing one.
+      - run: flutter test benchmark/frame_benchmark.dart
+      - run: flutter test benchmark/measurement_benchmark.dart
+
   publish-dry-run:
     runs-on: ubuntu-latest
     steps:
