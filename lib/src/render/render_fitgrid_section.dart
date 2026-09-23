@@ -101,6 +101,7 @@ class RenderFitGridSection extends RenderBox
     int focusedRow = -1,
     int focusedColumn = -1,
     int hoveredRow = -1,
+    (int, int, int, int) selectedRange = noRange,
     int rowIndexOffset = 0,
     FitGridCellSpanResolver? cellSpan,
     FitGridRowIndentResolver? rowIndent,
@@ -124,6 +125,7 @@ class RenderFitGridSection extends RenderBox
        _focusedRow = focusedRow,
        _focusedColumn = focusedColumn,
        _hoveredRow = hoveredRow,
+       _selectedRange = selectedRange,
        _rowIndexOffset = rowIndexOffset,
        _cellSpan = cellSpan,
        _rowIndent = rowIndent,
@@ -388,6 +390,29 @@ class RenderFitGridSection extends RenderBox
     if (_hoveredRow == value) return;
     _hoveredRow = value;
     markNeedsPaint();
+  }
+
+  /// The empty range: nothing selected.
+  static const (int, int, int, int) noRange = (-1, -1, -1, -1);
+
+  (int, int, int, int) _selectedRange;
+
+  /// The selected block of cells as (first row, last row, first column, last
+  /// column), inclusive and in this section's own indices, or [noRange].
+  ///
+  /// Painted as a wash with an outline, in the same pass as everything else,
+  /// so a range over ten thousand cells costs one rectangle per band.
+  (int, int, int, int) get selectedRange => _selectedRange;
+  set selectedRange((int, int, int, int) value) {
+    if (_selectedRange == value) return;
+    _selectedRange = value;
+    markNeedsPaint();
+    markNeedsSemanticsUpdate();
+  }
+
+  bool _inRange(int row, int column) {
+    final (r0, r1, c0, c1) = _selectedRange;
+    return r0 >= 0 && row >= r0 && row <= r1 && column >= c0 && column <= c1;
   }
 
   int _rowIndexOffset;
@@ -842,10 +867,63 @@ class RenderFitGridSection extends RenderBox
       ..save()
       ..clipRect(band);
     _paintRowBackgrounds(canvas, offset, band);
+    _paintRange(canvas, offset, firstColumn, lastColumn, fill: true);
     _paintRules(canvas, offset, band, firstColumn, lastColumn);
     _paintText(canvas, offset, firstColumn, lastColumn);
+    _paintRange(canvas, offset, firstColumn, lastColumn, fill: false);
     _paintFocusRing(canvas, offset, firstColumn, lastColumn);
     canvas.restore();
+  }
+
+  /// The part of the selected range inside one band: a wash under the text on
+  /// the first call, and an outline over it on the second.
+  ///
+  /// One rectangle per band rather than one per cell, because a range is
+  /// contiguous within a band whatever its size.
+  void _paintRange(
+    Canvas canvas,
+    Offset offset,
+    int firstColumn,
+    int lastColumn, {
+    required bool fill,
+  }) {
+    final (r0, r1, c0, c1) = _selectedRange;
+    if (r0 < 0) return;
+    final from = math.max(c0, firstColumn);
+    final to = math.min(c1, lastColumn - 1);
+    if (from > to) return;
+    final top = math.max(r0, _firstVisibleRow);
+    final bottom = math.min(r1, _lastVisibleRow - 1);
+    if (top > bottom) return;
+
+    final leftA = _screenLeft(from);
+    final leftB = _screenLeft(to);
+    final left = math.min(leftA, leftB);
+    final right = math.max(
+      leftA + _columnLayout.widths[from],
+      leftB + _columnLayout.widths[to],
+    );
+    final rect = Rect.fromLTRB(
+      offset.dx + left,
+      offset.dy + _rowMetrics.offsetOf(top) - _verticalOffset,
+      offset.dx + right,
+      offset.dy + _rowMetrics.offsetOf(bottom + 1) - _verticalOffset,
+    );
+    if (fill) {
+      canvas.drawRect(
+        rect,
+        Paint()..color = _theme.effectiveRangeSelectionBackground,
+      );
+      return;
+    }
+    final stroke = _theme.focusRingWidth / 2;
+    canvas.drawRect(
+      rect.deflate(stroke / 2),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..color = _theme.focusOutline,
+    );
   }
 
   void _paintRowBackgrounds(Canvas canvas, Offset offset, Rect band) {
@@ -1366,6 +1444,7 @@ class RenderFitGridSection extends RenderBox
         if (row == _focusedRow && column == _focusedColumn) {
           cellConfig.isFocused = true;
         }
+        if (_inRange(row, column)) cellConfig.isSelected = true;
         cellNode
           ..rect = Rect.fromLTWH(left, 0, width, rowHeight)
           ..updateWith(config: cellConfig, childrenInInversePaintOrder: null);

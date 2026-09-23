@@ -164,3 +164,66 @@ String fitGridToCsv(FitGridExportData data) => fitGridToDelimited(data);
 /// what pastes into a spreadsheet without an import dialog.
 String fitGridToTsv(FitGridExportData data) =>
     fitGridToDelimited(data, delimiter: '\t');
+
+/// Parses delimited text — what [fitGridToDelimited] writes, and what a
+/// spreadsheet puts on the clipboard — back into rows of cells.
+///
+/// Understands RFC 4180 quoting: a quoted field may hold the delimiter, a
+/// newline, or a doubled quote. A trailing line ending does not produce an
+/// empty last row, because every spreadsheet puts one on the clipboard and
+/// nobody means it as a row.
+List<List<String>> fitGridParseDelimited(
+  String text, {
+  String delimiter = ',',
+}) {
+  assert(delimiter.length == 1, 'The delimiter must be one character.');
+  final rows = <List<String>>[];
+  var row = <String>[];
+  final field = StringBuffer();
+  var quoted = false;
+  var i = 0;
+
+  void endField() {
+    row.add(field.toString());
+    field.clear();
+  }
+
+  void endRow() {
+    endField();
+    rows.add(row);
+    row = <String>[];
+  }
+
+  while (i < text.length) {
+    final char = text[i];
+    if (quoted) {
+      if (char == '"') {
+        if (i + 1 < text.length && text[i + 1] == '"') {
+          field.write('"');
+          i += 2;
+          continue;
+        }
+        quoted = false;
+      } else {
+        field.write(char);
+      }
+      i++;
+      continue;
+    }
+    if (char == '"' && field.isEmpty) {
+      quoted = true;
+    } else if (char == delimiter) {
+      endField();
+    } else if (char == '\r') {
+      if (i + 1 < text.length && text[i + 1] == '\n') i++;
+      endRow();
+    } else if (char == '\n') {
+      endRow();
+    } else {
+      field.write(char);
+    }
+    i++;
+  }
+  if (field.isNotEmpty || row.isNotEmpty) endRow();
+  return rows;
+}

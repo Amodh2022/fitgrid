@@ -36,6 +36,7 @@ class FitGridSection extends RenderObjectWidget {
     this.editingCell = (-1, -1),
     this.focusedCell = (-1, -1),
     this.hoveredRow = -1,
+    this.selectedRange = RenderFitGridSection.noRange,
     this.rowIndexOffset = 0,
     this.cellSpan,
     this.rowIndent,
@@ -81,6 +82,9 @@ class FitGridSection extends RenderObjectWidget {
   /// The row under the pointer, or -1.
   final int hoveredRow;
 
+  /// The selected block of cells, inclusive, or [RenderFitGridSection.noRange].
+  final (int, int, int, int) selectedRange;
+
   /// Added to a local row index to name it in the full dataset. Non-zero only
   /// when paginated, and used only by semantics.
   final int rowIndexOffset;
@@ -120,6 +124,7 @@ class FitGridSection extends RenderObjectWidget {
       focusedRow: focusedCell.$1,
       focusedColumn: focusedCell.$2,
       hoveredRow: hoveredRow,
+      selectedRange: selectedRange,
       rowIndexOffset: rowIndexOffset,
       cellSpan: cellSpan,
       rowIndent: rowIndent,
@@ -150,6 +155,7 @@ class FitGridSection extends RenderObjectWidget {
       ..editingCell = editingCell
       ..focusedCell = focusedCell
       ..hoveredRow = hoveredRow
+      ..selectedRange = selectedRange
       ..rowIndexOffset = rowIndexOffset
       ..cellSpan = cellSpan
       ..rowIndent = rowIndent

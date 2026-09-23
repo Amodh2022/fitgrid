@@ -10,6 +10,7 @@ import 'fitgrid_filter.dart';
 import 'fitgrid_focus.dart';
 import 'fitgrid_grouping.dart';
 import 'fitgrid_pagination.dart';
+import 'fitgrid_range.dart';
 
 /// Rows, and the ordering applied to them.
 ///
@@ -490,6 +491,9 @@ class FitGridController<T> {
   /// Grouping levels, tree structure, and which of them are open.
   final FitGridGroupingState<T> grouping = FitGridGroupingState<T>();
 
+  /// The selected rectangle of cells, when `FitGrid.cellSelection` is on.
+  final FitGridCellRangeState range = FitGridCellRangeState();
+
   void Function(int rowIndex, String? columnId, double padding)? _reveal;
 
   /// Wires the controller to a mounted grid so [scrollTo] has something to
@@ -613,5 +617,6 @@ class FitGridController<T> {
     focus.dispose();
     filter.dispose();
     grouping.dispose();
+    range.dispose();
   }
 }

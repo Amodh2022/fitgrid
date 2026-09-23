@@ -1,12 +1,15 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../controller/fitgrid_controller.dart';
 import '../controller/fitgrid_pagination.dart';
+import '../controller/fitgrid_range.dart';
+import '../export/fitgrid_export.dart';
 import '../model/column_width.dart';
 import '../model/data_source.dart';
 import '../model/enums.dart';
@@ -109,6 +112,8 @@ class FitGrid<T> extends StatefulWidget {
     this.keyboardNavigation = true,
     this.autofocus = false,
     this.enableCopy = true,
+    this.cellSelection = false,
+    this.enablePaste = true,
     this.hoverHighlight = true,
     this.rowColor,
     this.contextMenuBuilder,
@@ -277,6 +282,20 @@ class FitGrid<T> extends StatefulWidget {
   /// Whether Ctrl+C (Cmd+C) copies the selection to the clipboard as
   /// tab-separated text.
   final bool enableCopy;
+
+  /// Whether the user can select a rectangle of cells — by dragging with the
+  /// mouse, Shift+clicking, or Shift+arrow keys — as well as whole rows.
+  ///
+  /// A range copies as that rectangle, pastes into editable columns from its
+  /// top-left cell, and Delete clears the editable cells in it. The range lives
+  /// on [FitGridController.range].
+  final bool cellSelection;
+
+  /// Whether Ctrl+V (Cmd+V) pastes tab-separated text into the grid, starting
+  /// at the selected range or the focused cell. Only columns with an
+  /// [FitGridColumn.editor] take values, each through its own validator and
+  /// commit — the grid never writes to a row itself.
+  final bool enablePaste;
 
   /// Whether the row under the pointer is highlighted. Painted, not built.
   final bool hoverHighlight;
@@ -484,6 +503,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         controller.focus,
         controller.filter,
         controller.grouping,
+        controller.range,
       ]),
       builder: (context, _) => LayoutBuilder(
         builder: (context, constraints) => _build(context, constraints),
@@ -698,6 +718,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       striped: widget.striped,
       overscanRows: widget.overscanRows,
       editingCell: _editingCellIn(columns, controller, rowsView),
+      selectedRange: _localRange(columns, rowsView),
       focusedCell: focusedCell,
       hoveredRow: widget.hoverHighlight ? _hoveredRow : -1,
       rowIndexOffset: pageOffset,
@@ -1206,7 +1227,15 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         rows,
         openEditor: wantsTapEdit,
       ),
-      child: child,
+      child: widget.cellSelection
+          ? Listener(
+              onPointerDown: (event) => _rangeDragStart(event, columns, rows),
+              onPointerMove: (event) => _rangeDragUpdate(event, columns, rows),
+              onPointerUp: (_) => _rangeDragPointer = null,
+              onPointerCancel: (_) => _rangeDragPointer = null,
+              child: child,
+            )
+          : child,
     );
   }
 
@@ -1266,11 +1295,28 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         keys.isControlPressed ||
         keys.isMetaPressed ||
         column.id == FitGrid.selectionColumnId;
-    _controller.selection.applyGesture(
-      globalRow,
-      toggleKey: toggleKey,
-      rangeKey: keys.isShiftPressed,
-    );
+
+    // Shift+click under cell selection extends the block of cells, and only
+    // that: extending the row selection as well would select whole rows the
+    // user only meant to take a few cells from.
+    final extendsRange =
+        widget.cellSelection &&
+        keys.isShiftPressed &&
+        column.id != FitGrid.selectionColumnId;
+    if (widget.cellSelection && column.id != FitGrid.selectionColumnId) {
+      if (extendsRange) {
+        _controller.range.extendTo(globalRow, column.id);
+      } else {
+        _controller.range.select(globalRow, column.id);
+      }
+    }
+    if (!extendsRange) {
+      _controller.selection.applyGesture(
+        globalRow,
+        toggleKey: toggleKey,
+        rangeKey: keys.isShiftPressed,
+      );
+    }
 
     // The checkbox column is a selection control, not a cell: a tap on it
     // should not also open an editor or report a cell tap.
@@ -1281,7 +1327,194 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     widget.onCellTap?.call(row, globalRow, column.id);
   }
 
-  /// The cell under a global position, or null.
+  /// The pointer dragging out a range, or null.
+  int? _rangeDragPointer;
+
+  /// A mouse press starts a range. Touch is left alone: on a touch screen a
+  /// drag across the grid means scroll, and taking it for a selection would
+  /// leave the grid impossible to move with a finger.
+  void _rangeDragStart(
+    PointerDownEvent event,
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows,
+  ) {
+    if (event.kind != PointerDeviceKind.mouse ||
+        event.buttons != kPrimaryMouseButton) {
+      return;
+    }
+    final cell = _rangeCellAt(event.position, columns, rows);
+    if (cell == null) return;
+    _rangeDragPointer = event.pointer;
+    // The anchor is set here rather than left to the tap handler: a press that
+    // turns into a drag never becomes a tap, so the tap handler never runs.
+    if (HardwareKeyboard.instance.isShiftPressed) {
+      _controller.range.extendTo(cell.$1, cell.$2);
+    } else {
+      _controller.range.select(cell.$1, cell.$2);
+    }
+  }
+
+  void _rangeDragUpdate(
+    PointerMoveEvent event,
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows,
+  ) {
+    if (event.pointer != _rangeDragPointer) return;
+    _autoScrollForDrag(event.position);
+    final cell = _rangeCellAt(event.position, columns, rows, clamp: true);
+    if (cell == null) return;
+    _controller.range.extendTo(cell.$1, cell.$2);
+    if (widget.keyboardNavigation) {
+      _controller.focus.moveTo(cell.$1, cell.$2);
+    }
+  }
+
+  /// Scrolls when a drag reaches the edge of the body, so a range can be
+  /// dragged past what is on screen.
+  ///
+  /// Driven by pointer moves rather than a timer: the range grows as fast as
+  /// the pointer does and stops when it stops, which is what a spreadsheet
+  /// feels like under a mouse that is being held still at the edge only
+  /// briefly.
+  void _autoScrollForDrag(Offset globalPosition) {
+    final render = _sectionKey.currentContext?.findRenderObject();
+    if (render is! RenderFitGridSection) return;
+    final local = render.globalToLocal(globalPosition);
+    const edge = 24.0;
+    final size = render.size;
+
+    void nudge(ScrollController controller, double delta) {
+      if (!controller.hasClients || delta == 0) return;
+      final position = controller.position;
+      controller.jumpTo(
+        (position.pixels + delta).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+    }
+
+    if (local.dy < edge) nudge(_verticalController, local.dy - edge);
+    if (local.dy > size.height - edge) {
+      nudge(_verticalController, local.dy - size.height + edge);
+    }
+    final rtl = Directionality.of(context) == TextDirection.rtl;
+    final logicalX = rtl ? size.width - local.dx : local.dx;
+    if (logicalX < edge) nudge(_horizontalController, logicalX - edge);
+    if (logicalX > size.width - edge) {
+      nudge(_horizontalController, logicalX - size.width + edge);
+    }
+  }
+
+  /// The cell a range may start or end at: a data row, in a data column.
+  /// With [clamp], a position past the edge of the rows or columns names the
+  /// nearest cell rather than nothing, so a drag that overshoots keeps going.
+  (int, String)? _rangeCellAt(
+    Offset globalPosition,
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows, {
+    bool clamp = false,
+  }) {
+    final render = _sectionKey.currentContext?.findRenderObject();
+    if (render is! RenderFitGridSection || rows.isEmpty) return null;
+    final local = render.globalToLocal(globalPosition);
+    var row = render.rowAtOffset(local.dy);
+    var column = render.columnAtOffset(local.dx);
+    if (clamp) {
+      if (row < 0) {
+        row = local.dy < 0
+            ? math.max(0, render.rowAtOffset(0))
+            : rows.length - 1;
+      }
+      if (column < 0) {
+        final rtl = Directionality.of(context) == TextDirection.rtl;
+        column = (local.dx < 0) != rtl ? 0 : columns.length - 1;
+      }
+      row = row.clamp(0, rows.length - 1);
+    }
+    if (row < 0 || row >= rows.length) return null;
+    if (column < 0 || column >= columns.length) return null;
+    if (columns[column].id == FitGrid.selectionColumnId) {
+      if (!clamp || columns.length < 2) return null;
+      column = 1;
+    }
+    if (rows.isHeader(row)) {
+      if (!clamp) return null;
+      // A group header has no cells to select; step onto the nearest row.
+      var probe = row;
+      while (probe < rows.length && rows.isHeader(probe)) {
+        probe++;
+      }
+      if (probe >= rows.length) return null;
+      row = probe;
+    }
+    return (rows.globalIndex(row), columns[column].id);
+  }
+
+  /// The selected range in the section's own indices, clipped to the rows on
+  /// this page, or [RenderFitGridSection.noRange].
+  ///
+  /// A single cell is not painted as a range: it is the focused cell, and the
+  /// focus ring already says so.
+  (int, int, int, int) _localRange(
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows,
+  ) {
+    final range = _controller.range.range;
+    if (!widget.cellSelection || range == null || range.isSingleCell) {
+      return RenderFitGridSection.noRange;
+    }
+    final ids = <String>[for (final column in columns) column.id];
+    final a = ids.indexOf(range.anchorColumnId);
+    final b = ids.indexOf(range.extentColumnId);
+    if (a < 0 || b < 0) return RenderFitGridSection.noRange;
+
+    int first;
+    int last;
+    if (rows.displayAt == null) {
+      first = math.max(range.firstRow - rows.offset, 0);
+      last = math.min(range.lastRow - rows.offset, rows.length - 1);
+    } else {
+      final la = rows.localIndex(range.anchorRow);
+      final lb = rows.localIndex(range.extentRow);
+      if (la < 0 || lb < 0) return RenderFitGridSection.noRange;
+      first = math.min(la, lb);
+      last = math.max(la, lb);
+    }
+    if (first > last) return RenderFitGridSection.noRange;
+    return (first, last, math.min(a, b), math.max(a, b));
+  }
+
+  /// The rows a range covers, as indices into the full row list, in display
+  /// order. Group headers inside it are skipped — they are not rows.
+  List<int> _rangeRows(FitGridCellRange range, FitGridRowsView<T> rows) {
+    if (rows.displayAt == null) {
+      return <int>[for (var i = range.firstRow; i <= range.lastRow; i++) i];
+    }
+    final a = rows.localIndex(range.anchorRow);
+    final b = rows.localIndex(range.extentRow);
+    if (a < 0 || b < 0) return const <int>[];
+    return <int>[
+      for (var i = math.min(a, b); i <= math.max(a, b); i++)
+        if (!rows.isHeader(i)) rows.globalIndex(i),
+    ];
+  }
+
+  /// The data columns a range covers, in display order.
+  List<FitGridColumn<T>> _rangeColumns(
+    FitGridCellRange range,
+    List<FitGridColumn<T>> columns,
+  ) {
+    final ids = range.columnIdsIn(<String>[
+      for (final column in columns) column.id,
+    ]);
+    return <FitGridColumn<T>>[
+      for (final column in columns)
+        if (ids.contains(column.id) && column.id != FitGrid.selectionColumnId)
+          column,
+    ];
+  }
+
   /// Whether a widget cell under [globalPosition] listens for pointers itself
   /// — a button, an InkWell, a checkbox — in which case the tap is its to
   /// handle.
@@ -1389,11 +1622,19 @@ class _FitGridState<T> extends State<FitGrid<T>> {
 
   // -------------------------------------------------------------- keyboard
 
+  /// Whether key presses are the grid's to act on: the grid itself holds
+  /// primary focus, rather than an open editor or a focusable widget inside a
+  /// cell. Without this a Space typed into an editor would toggle the row's
+  /// selection, and an arrow key would move the grid's focus out from under
+  /// the caret.
+  bool _gridHasKeyboard() => _focusNode.hasPrimaryFocus;
+
   Map<Type, Action<Intent>> _actions(
     List<FitGridColumn<T>> columns,
     FitGridRowsView<T> rows,
   ) => <Type, Action<Intent>>{
-    FitGridMoveIntent: CallbackAction<FitGridMoveIntent>(
+    FitGridMoveIntent: _GridAction<FitGridMoveIntent>(
+      enabled: _gridHasKeyboard,
       onInvoke: (intent) {
         _moveFocus(
           columns,
@@ -1405,13 +1646,15 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         return null;
       },
     ),
-    FitGridJumpIntent: CallbackAction<FitGridJumpIntent>(
+    FitGridJumpIntent: _GridAction<FitGridJumpIntent>(
+      enabled: _gridHasKeyboard,
       onInvoke: (intent) {
         _jumpFocus(columns, rows, intent);
         return null;
       },
     ),
-    FitGridPageIntent: CallbackAction<FitGridPageIntent>(
+    FitGridPageIntent: _GridAction<FitGridPageIntent>(
+      enabled: _gridHasKeyboard,
       onInvoke: (intent) {
         _moveFocus(
           columns,
@@ -1423,7 +1666,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         return null;
       },
     ),
-    FitGridActivateIntent: CallbackAction<FitGridActivateIntent>(
+    FitGridActivateIntent: _GridAction<FitGridActivateIntent>(
+      enabled: _gridHasKeyboard,
       onInvoke: (_) {
         final focus = _controller.focus;
         final columnIndex = _focusedColumnIndex(columns);
@@ -1437,7 +1681,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         return null;
       },
     ),
-    FitGridToggleSelectionIntent: CallbackAction<FitGridToggleSelectionIntent>(
+    FitGridToggleSelectionIntent: _GridAction<FitGridToggleSelectionIntent>(
+      enabled: _gridHasKeyboard,
       onInvoke: (_) {
         final row = _controller.focus.rowIndex;
         if (row != null) {
@@ -1446,7 +1691,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         return null;
       },
     ),
-    FitGridSelectAllIntent: CallbackAction<FitGridSelectAllIntent>(
+    FitGridSelectAllIntent: _GridAction<FitGridSelectAllIntent>(
+      enabled: _gridHasKeyboard,
       onInvoke: (_) {
         if (_controller.selection.mode != FitGridSelectionMode.multiple) {
           return null;
@@ -1457,19 +1703,44 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         return null;
       },
     ),
-    FitGridCopyIntent: CallbackAction<FitGridCopyIntent>(
+    FitGridCopyIntent: _GridAction<FitGridCopyIntent>(
+      enabled: _gridHasKeyboard,
       onInvoke: (_) {
         if (widget.enableCopy) _copy(columns, rows);
         return null;
       },
     ),
-    FitGridDismissIntent: CallbackAction<FitGridDismissIntent>(
+    FitGridDismissIntent: _GridAction<FitGridDismissIntent>(
+      enabled: _gridHasKeyboard,
       onInvoke: (_) {
         if (_controller.editing.isEditing) {
           _controller.editing.cancel();
+        } else if (_controller.range.isMultiCell) {
+          final range = _controller.range.range!;
+          _controller.range.select(range.anchorRow, range.anchorColumnId);
         } else {
           _controller.selection.clear();
         }
+        return null;
+      },
+    ),
+    FitGridPasteIntent: _GridAction<FitGridPasteIntent>(
+      enabled: () =>
+          _gridHasKeyboard() &&
+          widget.enablePaste &&
+          columns.any((column) => column.isEditable),
+      onInvoke: (_) {
+        _paste(columns, rows);
+        return null;
+      },
+    ),
+    FitGridClearCellsIntent: _GridAction<FitGridClearCellsIntent>(
+      enabled: () =>
+          _gridHasKeyboard() &&
+          widget.cellSelection &&
+          columns.any((column) => column.isEditable),
+      onInvoke: (_) {
+        _clearCells(columns, rows);
         return null;
       },
     ),
@@ -1526,7 +1797,17 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     );
 
     focus.moveTo(nextRow, columns[nextColumn].id);
-    if (extend && _controller.selection.mode == FitGridSelectionMode.multiple) {
+    if (widget.cellSelection) {
+      _moveRange(
+        columns,
+        currentRow,
+        columns[currentColumn].id,
+        nextRow,
+        columns[nextColumn].id,
+        extend: extend,
+      );
+    } else if (extend &&
+        _controller.selection.mode == FitGridSelectionMode.multiple) {
       _controller.selection.applyGesture(nextRow, rangeKey: true);
     }
     _controller.scrollTo(nextRow, columnId: columns[nextColumn].id);
@@ -1545,6 +1826,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     var row = focus.rowIndex ?? rows.offset;
     var columnIndex = _focusedColumnIndex(columns);
     if (columnIndex < 0) columnIndex = 0;
+    final fromRow = row;
+    final fromColumn = columns[columnIndex].id;
 
     if (intent.toRowEdge) {
       row = intent.toStart ? 0 : total - 1;
@@ -1553,11 +1836,39 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     }
 
     focus.moveTo(row, columns[columnIndex].id);
-    if (intent.extend &&
+    if (widget.cellSelection) {
+      _moveRange(
+        columns,
+        fromRow,
+        fromColumn,
+        row,
+        columns[columnIndex].id,
+        extend: intent.extend,
+      );
+    } else if (intent.extend &&
         _controller.selection.mode == FitGridSelectionMode.multiple) {
       _controller.selection.applyGesture(row, rangeKey: true);
     }
     _controller.scrollTo(row, columnId: columns[columnIndex].id);
+  }
+
+  /// Keeps the range in step with a keyboard move: Shift extends it from where
+  /// the focus was, a plain move collapses it onto the new cell.
+  void _moveRange(
+    List<FitGridColumn<T>> columns,
+    int fromRow,
+    String fromColumn,
+    int toRow,
+    String toColumn, {
+    required bool extend,
+  }) {
+    if (toColumn == FitGrid.selectionColumnId) return;
+    final range = _controller.range;
+    if (!extend) return range.select(toRow, toColumn);
+    if (!range.isActive && fromColumn != FitGrid.selectionColumnId) {
+      range.select(fromRow, fromColumn);
+    }
+    range.extendTo(toRow, toColumn);
   }
 
   /// Enter, or a screen reader's activate: edit the cell if it can be edited,
@@ -1606,6 +1917,10 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   /// without an import dialog, and because a grid's job here is to get the
   /// numbers into the other window, not to define a file format.
   void _copy(List<FitGridColumn<T>> columns, FitGridRowsView<T> rows) {
+    final range = _controller.range.range;
+    if (widget.cellSelection && range != null && !range.isSingleCell) {
+      return _copyRange(range, columns, rows);
+    }
     final copyable = <FitGridColumn<T>>[
       for (final column in columns)
         if (column.id != FitGrid.selectionColumnId) column,
@@ -1628,7 +1943,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     final buffer = StringBuffer();
     for (var i = 0; i < indices.length; i++) {
       if (i > 0) buffer.write('\n');
-      final row = _rowForGlobalIndex(indices[i], rows);
+      final row = _rowForGlobalIndex(indices[i]);
       if (row == null) continue;
       if (singleCell && focusedColumn >= 0) {
         buffer.write(_escapeCell(columns[focusedColumn].copyTextFor(row)));
@@ -1643,6 +1958,213 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     Clipboard.setData(ClipboardData(text: buffer.toString()));
   }
 
+  /// Copies a block of cells as a block: a spreadsheet pastes it back as the
+  /// same rectangle.
+  void _copyRange(
+    FitGridCellRange range,
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows,
+  ) {
+    final cols = _rangeColumns(range, columns);
+    if (cols.isEmpty) return;
+    final buffer = StringBuffer();
+    var first = true;
+    for (final index in _rangeRows(range, rows)) {
+      final row = _rowForGlobalIndex(index);
+      if (row == null) continue;
+      if (!first) buffer.write('\n');
+      first = false;
+      for (var c = 0; c < cols.length; c++) {
+        if (c > 0) buffer.write('\t');
+        buffer.write(_escapeCell(cols[c].copyTextFor(row)));
+      }
+    }
+    Clipboard.setData(ClipboardData(text: buffer.toString()));
+  }
+
+  /// Pastes tab-separated text into the grid.
+  ///
+  /// Starts at the top-left of the range, or at the focused cell, and fills
+  /// rightwards and downwards through the columns as displayed. A single value
+  /// pasted over a range fills every cell of it, the way a spreadsheet does.
+  /// Every value goes through its column's validator and commit; a column with
+  /// no editor, or a value the validator rejects, is skipped rather than
+  /// stopping the paste halfway.
+  Future<void> _paste(
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows,
+  ) async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty || !mounted) return;
+    final grid = fitGridParseDelimited(text, delimiter: '\t');
+    if (grid.isEmpty) return;
+
+    final range = widget.cellSelection ? _controller.range.range : null;
+    final focus = _controller.focus;
+    final startRow = range?.firstRow ?? focus.rowIndex;
+    if (startRow == null) return;
+
+    final data2 = <FitGridColumn<T>>[
+      for (final column in columns)
+        if (column.id != FitGrid.selectionColumnId) column,
+    ];
+    final List<FitGridColumn<T>> targetColumns;
+    final List<int> targetRows;
+    final fill =
+        range != null &&
+        !range.isSingleCell &&
+        grid.length == 1 &&
+        grid.first.length == 1;
+    if (fill) {
+      targetColumns = _rangeColumns(range, columns);
+      targetRows = _rangeRows(range, rows);
+    } else {
+      final startColumnId = range == null
+          ? focus.columnId
+          : _rangeColumns(range, columns).firstOrNull?.id;
+      final startColumn = data2.indexWhere((c) => c.id == startColumnId);
+      if (startColumn < 0) return;
+      final width = grid.fold<int>(
+        0,
+        (w, line) => line.length > w ? line.length : w,
+      );
+      targetColumns = data2.sublist(
+        startColumn,
+        math.min(data2.length, startColumn + width),
+      );
+      targetRows = _rowsFrom(startRow, grid.length, rows);
+    }
+
+    // Resolve every target row before committing anything: a commit may hand
+    // the grid new rows, and under a sort the next target would then be
+    // whichever row had moved into its place.
+    final targets = <(T, int)>[
+      for (final index in targetRows)
+        if (_rowForGlobalIndex(index) case final row?) (row, index),
+    ];
+    final edits = <FitGridCellEdit<T>>[];
+    for (var r = 0; r < targets.length; r++) {
+      final line = fill ? grid.first : grid[r];
+      for (var c = 0; c < targetColumns.length; c++) {
+        if (!fill && c >= line.length) break;
+        final value = fill ? line.first : line[c];
+        final (row, index) = targets[r];
+        edits.add(
+          FitGridCellEdit<T>(
+            row: row,
+            rowIndex: index,
+            column: targetColumns[c],
+            value: value,
+          ),
+        );
+      }
+    }
+    _applyEdits(edits);
+
+    // Leave the pasted block selected, so it is obvious what changed and a
+    // second paste or a Delete applies to the same cells.
+    if (widget.cellSelection && !fill && targets.isNotEmpty) {
+      _controller.range.range = FitGridCellRange(
+        anchorRow: targets.first.$2,
+        anchorColumnId: targetColumns.first.id,
+        extentRow: targets.last.$2,
+        extentColumnId: targetColumns.last.id,
+      );
+    }
+  }
+
+  /// [count] rows in display order starting at [start], as global indices.
+  List<int> _rowsFrom(int start, int count, FitGridRowsView<T> rows) {
+    if (rows.displayAt == null) {
+      final total = widget.dataSource?.rowCount ?? _controller.data.length;
+      return <int>[
+        for (var i = start; i < math.min(total, start + count); i++) i,
+      ];
+    }
+    final out = <int>[];
+    for (var i = rows.localIndex(start); i >= 0 && i < rows.length; i++) {
+      if (rows.isHeader(i)) continue;
+      out.add(rows.globalIndex(i));
+      if (out.length == count) break;
+    }
+    return out;
+  }
+
+  /// Delete or Backspace over a range: empties the editable cells in it, or
+  /// the focused cell when there is no range.
+  void _clearCells(List<FitGridColumn<T>> columns, FitGridRowsView<T> rows) {
+    final range = _controller.range.range;
+    final focus = _controller.focus;
+    final List<FitGridColumn<T>> cols;
+    final List<int> indices;
+    if (range != null) {
+      cols = _rangeColumns(range, columns);
+      indices = _rangeRows(range, rows);
+    } else if (focus.hasFocus) {
+      cols = <FitGridColumn<T>>[
+        for (final column in columns)
+          if (column.id == focus.columnId) column,
+      ];
+      indices = <int>[focus.rowIndex!];
+    } else {
+      return;
+    }
+    _applyEdits(<FitGridCellEdit<T>>[
+      for (final index in indices)
+        if (_rowForGlobalIndex(index) case final row?)
+          for (final column in cols)
+            FitGridCellEdit<T>(
+              row: row,
+              rowIndex: index,
+              column: column,
+              value: '',
+            ),
+    ]);
+  }
+
+  /// Applies a batch of edits through each column's validator and commit,
+  /// skipping columns without an editor and values the validator rejects.
+  ///
+  /// The one door every programmatic change to cell values goes through —
+  /// paste, clear, fill — so the rules for what may be written are the same
+  /// rules a user typing into an editor is held to.
+  List<FitGridCellEdit<T>> _applyEdits(List<FitGridCellEdit<T>> edits) {
+    final applied = <FitGridCellEdit<T>>[];
+    final data = _controller.data;
+    // Whether a commit can move rows: under a sort or a filter, writing a value
+    // may reorder the view or drop a row from it, so an index no longer names
+    // the row it did when the batch was planned.
+    final unstable =
+        widget.dataSource == null &&
+        (data.sortKeys.isNotEmpty || data.filter != null);
+    for (final edit in edits) {
+      final editor = edit.column.editor;
+      if (editor == null) continue;
+      // A host with immutable rows replaces a row on every commit, so the
+      // second cell written to it must be built from the replacement or it
+      // would quietly undo the first. Where indices are stable the current
+      // row at that index is that replacement; where they are not, the row
+      // resolved when the batch was planned is the only safe answer.
+      var row = edit.row;
+      if (!unstable) {
+        final current = _rowForGlobalIndex(edit.rowIndex);
+        if (current != null) row = current;
+      }
+      if (editor.validator?.call(row, edit.value) != null) continue;
+      editor.onCommit(row, edit.rowIndex, edit.value);
+      applied.add(
+        FitGridCellEdit<T>(
+          row: row,
+          rowIndex: edit.rowIndex,
+          column: edit.column,
+          value: edit.value,
+        ),
+      );
+    }
+    return applied;
+  }
+
   /// A tab or a newline inside a cell would otherwise become a column or a row
   /// on paste, silently shifting everything after it.
   static String _escapeCell(String value) {
@@ -1650,7 +2172,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     return '"${value.replaceAll('"', '""')}"';
   }
 
-  T? _rowForGlobalIndex(int index, FitGridRowsView<T> rows) {
+  T? _rowForGlobalIndex(int index) {
     final source = widget.dataSource;
     if (source != null) return source.rowAt(index);
     final view = _controller.data.view;
@@ -2124,4 +2646,16 @@ class _SelectAllBox extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A [CallbackAction] that can decline, so a key it would otherwise take goes
+/// on to whatever else is listening — the text field of an open editor, a
+/// button inside a widget cell.
+class _GridAction<I extends Intent> extends CallbackAction<I> {
+  _GridAction({required this.enabled, required super.onInvoke});
+
+  final bool Function() enabled;
+
+  @override
+  bool isEnabled(I intent) => enabled();
 }

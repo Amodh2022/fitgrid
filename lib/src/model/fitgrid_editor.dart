@@ -1,6 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import 'fitgrid_column.dart';
+
 /// What opens an editor on a cell.
 enum FitGridEditTrigger {
   /// Double-tap the cell. The default, because a single tap already means
@@ -109,4 +111,29 @@ class FitGridEditor<T> {
   /// spreadsheet convention and the less surprising of the two, but a grid
   /// whose edits are expensive — a write per commit — may want the opposite.
   final bool commitOnFocusLoss;
+}
+
+/// One value written to one cell, by anything other than the user typing into
+/// an editor — a paste, a Delete over a range, a fill-handle drag.
+///
+/// Each goes through the column's own [FitGridEditor.validator] and
+/// [FitGridEditor.onCommit], exactly as a typed edit would.
+@immutable
+class FitGridCellEdit<T> {
+  const FitGridCellEdit({
+    required this.row,
+    required this.rowIndex,
+    required this.column,
+    required this.value,
+  });
+
+  final T row;
+
+  /// Index into the full row list, not the page.
+  final int rowIndex;
+
+  final FitGridColumn<T> column;
+
+  /// The text being committed.
+  final String value;
 }

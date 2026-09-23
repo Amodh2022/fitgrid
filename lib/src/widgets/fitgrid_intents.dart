@@ -63,6 +63,17 @@ class FitGridCopyIntent extends Intent {
   const FitGridCopyIntent();
 }
 
+/// Pastes tab-separated text from the clipboard into the editable cells at
+/// the selected range or the focused cell.
+class FitGridPasteIntent extends Intent {
+  const FitGridPasteIntent();
+}
+
+/// Empties the editable cells of the selected range, or the focused cell.
+class FitGridClearCellsIntent extends Intent {
+  const FitGridClearCellsIntent();
+}
+
 /// Clears the selection, or closes an open editor.
 class FitGridDismissIntent extends Intent {
   const FitGridDismissIntent();
@@ -77,59 +88,77 @@ class FitGridDismissIntent extends Intent {
 ///
 /// Pass your own map to [FitGrid] through a `Shortcuts` ancestor to override
 /// any of it; the actions are resolved by intent, not by key.
-const Map<ShortcutActivator, Intent> kFitGridShortcuts =
-    <ShortcutActivator, Intent>{
-      SingleActivator(LogicalKeyboardKey.arrowUp): FitGridMoveIntent(-1, 0),
-      SingleActivator(LogicalKeyboardKey.arrowDown): FitGridMoveIntent(1, 0),
-      SingleActivator(LogicalKeyboardKey.arrowLeft): FitGridMoveIntent(0, -1),
-      SingleActivator(LogicalKeyboardKey.arrowRight): FitGridMoveIntent(0, 1),
-      SingleActivator(LogicalKeyboardKey.arrowUp, shift: true):
-          FitGridMoveIntent(-1, 0, extend: true),
-      SingleActivator(LogicalKeyboardKey.arrowDown, shift: true):
-          FitGridMoveIntent(1, 0, extend: true),
-      SingleActivator(LogicalKeyboardKey.tab): FitGridMoveIntent(0, 1),
-      SingleActivator(LogicalKeyboardKey.tab, shift: true): FitGridMoveIntent(
-        0,
-        -1,
-      ),
+const Map<ShortcutActivator, Intent>
+kFitGridShortcuts = <ShortcutActivator, Intent>{
+  SingleActivator(LogicalKeyboardKey.arrowUp): FitGridMoveIntent(-1, 0),
+  SingleActivator(LogicalKeyboardKey.arrowDown): FitGridMoveIntent(1, 0),
+  SingleActivator(LogicalKeyboardKey.arrowLeft): FitGridMoveIntent(0, -1),
+  SingleActivator(LogicalKeyboardKey.arrowRight): FitGridMoveIntent(0, 1),
+  SingleActivator(LogicalKeyboardKey.arrowUp, shift: true): FitGridMoveIntent(
+    -1,
+    0,
+    extend: true,
+  ),
+  SingleActivator(LogicalKeyboardKey.arrowDown, shift: true): FitGridMoveIntent(
+    1,
+    0,
+    extend: true,
+  ),
+  SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true): FitGridMoveIntent(
+    0,
+    -1,
+    extend: true,
+  ),
+  SingleActivator(LogicalKeyboardKey.arrowRight, shift: true):
+      FitGridMoveIntent(0, 1, extend: true),
+  SingleActivator(LogicalKeyboardKey.tab): FitGridMoveIntent(0, 1),
+  SingleActivator(LogicalKeyboardKey.tab, shift: true): FitGridMoveIntent(
+    0,
+    -1,
+  ),
 
-      SingleActivator(LogicalKeyboardKey.home): FitGridJumpIntent(
-        toRowEdge: false,
-        toStart: true,
-      ),
-      SingleActivator(LogicalKeyboardKey.end): FitGridJumpIntent(
-        toRowEdge: false,
-        toStart: false,
-      ),
-      SingleActivator(LogicalKeyboardKey.home, control: true):
-          FitGridJumpIntent(toRowEdge: true, toStart: true),
-      SingleActivator(LogicalKeyboardKey.end, control: true): FitGridJumpIntent(
-        toRowEdge: true,
-        toStart: false,
-      ),
-      SingleActivator(LogicalKeyboardKey.home, meta: true): FitGridJumpIntent(
-        toRowEdge: true,
-        toStart: true,
-      ),
-      SingleActivator(LogicalKeyboardKey.end, meta: true): FitGridJumpIntent(
-        toRowEdge: true,
-        toStart: false,
-      ),
+  SingleActivator(LogicalKeyboardKey.home): FitGridJumpIntent(
+    toRowEdge: false,
+    toStart: true,
+  ),
+  SingleActivator(LogicalKeyboardKey.end): FitGridJumpIntent(
+    toRowEdge: false,
+    toStart: false,
+  ),
+  SingleActivator(LogicalKeyboardKey.home, control: true): FitGridJumpIntent(
+    toRowEdge: true,
+    toStart: true,
+  ),
+  SingleActivator(LogicalKeyboardKey.end, control: true): FitGridJumpIntent(
+    toRowEdge: true,
+    toStart: false,
+  ),
+  SingleActivator(LogicalKeyboardKey.home, meta: true): FitGridJumpIntent(
+    toRowEdge: true,
+    toStart: true,
+  ),
+  SingleActivator(LogicalKeyboardKey.end, meta: true): FitGridJumpIntent(
+    toRowEdge: true,
+    toStart: false,
+  ),
 
-      SingleActivator(LogicalKeyboardKey.pageUp): FitGridPageIntent(-1),
-      SingleActivator(LogicalKeyboardKey.pageDown): FitGridPageIntent(1),
+  SingleActivator(LogicalKeyboardKey.pageUp): FitGridPageIntent(-1),
+  SingleActivator(LogicalKeyboardKey.pageDown): FitGridPageIntent(1),
 
-      SingleActivator(LogicalKeyboardKey.enter): FitGridActivateIntent(),
-      SingleActivator(LogicalKeyboardKey.numpadEnter): FitGridActivateIntent(),
-      SingleActivator(LogicalKeyboardKey.space): FitGridToggleSelectionIntent(),
+  SingleActivator(LogicalKeyboardKey.enter): FitGridActivateIntent(),
+  SingleActivator(LogicalKeyboardKey.numpadEnter): FitGridActivateIntent(),
+  SingleActivator(LogicalKeyboardKey.space): FitGridToggleSelectionIntent(),
 
-      SingleActivator(LogicalKeyboardKey.keyA, control: true):
-          FitGridSelectAllIntent(),
-      SingleActivator(LogicalKeyboardKey.keyA, meta: true):
-          FitGridSelectAllIntent(),
-      SingleActivator(LogicalKeyboardKey.keyC, control: true):
-          FitGridCopyIntent(),
-      SingleActivator(LogicalKeyboardKey.keyC, meta: true): FitGridCopyIntent(),
+  SingleActivator(LogicalKeyboardKey.keyA, control: true):
+      FitGridSelectAllIntent(),
+  SingleActivator(LogicalKeyboardKey.keyA, meta: true):
+      FitGridSelectAllIntent(),
+  SingleActivator(LogicalKeyboardKey.keyC, control: true): FitGridCopyIntent(),
+  SingleActivator(LogicalKeyboardKey.keyC, meta: true): FitGridCopyIntent(),
+  SingleActivator(LogicalKeyboardKey.keyV, control: true): FitGridPasteIntent(),
+  SingleActivator(LogicalKeyboardKey.keyV, meta: true): FitGridPasteIntent(),
+  SingleActivator(LogicalKeyboardKey.delete): FitGridClearCellsIntent(),
+  SingleActivator(LogicalKeyboardKey.backspace): FitGridClearCellsIntent(),
 
-      SingleActivator(LogicalKeyboardKey.escape): FitGridDismissIntent(),
-    };
+  SingleActivator(LogicalKeyboardKey.escape): FitGridDismissIntent(),
+};
