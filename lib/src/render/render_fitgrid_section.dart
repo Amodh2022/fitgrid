@@ -688,8 +688,6 @@ class RenderFitGridSection extends RenderBox
         size.width - layout.trailingFrozenWidth,
         offset,
       ),
-      bandFirst: layout.leadingFrozenCount,
-      bandLast: layout.trailingFrozenStart,
     );
 
     if (layout.leadingFrozenCount > 0) {
@@ -725,6 +723,7 @@ class RenderFitGridSection extends RenderBox
       );
     }
 
+    _paintSpans(canvas, offset);
     canvas.restore();
     _pruneCache();
     defaultPaint(context, offset);
@@ -737,24 +736,15 @@ class RenderFitGridSection extends RenderBox
     Offset offset,
     int firstColumn,
     int lastColumn,
-    Rect band, {
-    int? bandFirst,
-    int? bandLast,
-  }) {
+    Rect band,
+  ) {
     if (band.width <= 0) return;
     canvas
       ..save()
       ..clipRect(band);
     _paintRowBackgrounds(canvas, offset, band);
     _paintRules(canvas, offset, band, firstColumn, lastColumn);
-    _paintText(
-      canvas,
-      offset,
-      firstColumn,
-      lastColumn,
-      bandFirst ?? firstColumn,
-      bandLast ?? lastColumn,
-    );
+    _paintText(canvas, offset, firstColumn, lastColumn);
     _paintFocusRing(canvas, offset, firstColumn, lastColumn);
     canvas.restore();
   }
@@ -887,104 +877,127 @@ class RenderFitGridSection extends RenderBox
     Offset offset,
     int firstColumn,
     int lastColumn,
-    int bandFirst,
-    int bandLast,
   ) {
     final padding = _theme.effectiveCellPadding;
 
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
-      final top = offset.dy + _rowMetrics.offsetOf(row) - _verticalOffset;
-      final height = _rowMetrics.heightOf(row);
-
-      // A spanned cell can begin before this band and reach into it, so when
-      // any cell spans the scan starts at the first column of the band's range
-      // rather than at the first visible one. The band's clip is what keeps
-      // that honest; column counts are small, and spans are rare.
-      final from = _cellSpan == null ? firstColumn : bandFirst;
-      final to = _cellSpan == null ? lastColumn : bandLast;
-
-      for (var column = from; column < to; column++) {
+      for (var column = firstColumn; column < lastColumn; column++) {
         final span = _spanAt(row, column);
-        if (_paintColumns[column].isWidgetColumn) {
+        // A merged cell can reach past the band it starts in — a group header
+        // beginning inside a pinned column is the ordinary case — so it is left
+        // to `_paintSpans`, which runs outside every band clip. Here it only
+        // costs the columns it covers.
+        if (span > 1) {
           column += span - 1;
           continue;
         }
-        if (row == _editingRow && column == _editingColumn) {
-          column += span - 1;
-          continue;
-        }
+        _paintCell(canvas, offset, row, column, 1, padding);
+      }
+    }
+  }
 
-        final width = span == 1
-            ? _columnLayout.widths[column]
-            : _columnLayout.offsets[column + span] -
-                  _columnLayout.offsets[column];
-        final indent = column == 0 ? (_rowIndent?.call(row) ?? 0.0) : 0.0;
-        final available = width - padding.horizontal - indent;
-        if (available <= 0) continue;
-        final availableHeight = height - padding.vertical;
-        if (availableHeight <= 0) continue;
+  /// The merged cells, painted after the bands and clipped only by the section.
+  ///
+  /// A span is the one thing that does not belong to a band: pinning a column
+  /// should not cut a group header off at 44 pixels.
+  void _paintSpans(Canvas canvas, Offset offset) {
+    if (_cellSpan == null) return;
+    final padding = _theme.effectiveCellPadding;
 
-        final cell = _cellFor(row, column, available, availableHeight);
-        final leadingEdge = offset.dx + _screenLeft(column);
-        // Under RTL a span grows leftwards from its own column, so its box
-        // starts where the last covered column does.
-        final left = _textDirection == TextDirection.ltr
-            ? leadingEdge
-            : leadingEdge + _columnLayout.widths[column] - width;
-
-        final rtl = _textDirection == TextDirection.rtl;
-        final contentWidth = cell.painter.width + cell.iconAdvance;
-        final free = available - contentWidth;
-        // The indent belongs on the leading edge. Under RTL that is the right,
-        // and the reduced `available` above has already put it there — adding
-        // it here as well would count it twice.
-        final leading =
-            padding.left + (_textDirection == TextDirection.ltr ? indent : 0.0);
-        final inset = switch (_resolvedAlignment(column)) {
-          FitGridAlignment.start => leading,
-          FitGridAlignment.center => leading + math.max(0, free) / 2,
-          FitGridAlignment.end => leading + math.max(0, free),
-        };
-        final contentLeft = left + inset;
-        final textLeft = rtl ? contentLeft : contentLeft + cell.iconAdvance;
-        final origin = Offset(
-          textLeft,
-          top + (height - cell.painter.height) / 2,
-        );
-        final cellRect = Rect.fromLTWH(left, top, width, height);
-
-        // A cell that still does not fit — one line taller than the whole row,
-        // say — is clipped to its own box rather than allowed to paint over its
-        // neighbours. The save/restore is skipped in the overwhelmingly common
-        // case where the text already fits, because this runs per cell per
-        // frame of a scroll.
-        final needsClip = cell.overflows;
-        if (needsClip) {
-          canvas
-            ..save()
-            ..clipRect(cellRect);
-        }
-
-        if (cell.icon != null) {
-          final iconLeft = rtl
-              ? contentLeft + contentWidth - cell.iconAdvance
-              : contentLeft;
-          cell.icon!.paint(
-            canvas,
-            Offset(iconLeft, top + (height - cell.icon!.height) / 2),
-          );
-        }
-
-        if (cell.hasHighlights) {
-          _paintHighlights(canvas, cell, origin);
-        }
-
-        cell.painter.paint(canvas, origin);
-        if (needsClip) canvas.restore();
-        _byCell[_cellKey(row, column)] = cell;
+    for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
+      for (var column = 0; column < _columnLayout.length; column++) {
+        final span = _spanAt(row, column);
+        if (span <= 1) continue;
+        _paintCell(canvas, offset, row, column, span, padding);
         column += span - 1;
       }
     }
+  }
+
+  /// One cell, covering [span] columns from [column].
+  void _paintCell(
+    Canvas canvas,
+    Offset offset,
+    int row,
+    int column,
+    int span,
+    EdgeInsets padding,
+  ) {
+    if (_paintColumns[column].isWidgetColumn) return;
+    if (row == _editingRow && column == _editingColumn) return;
+
+    final top = offset.dy + _rowMetrics.offsetOf(row) - _verticalOffset;
+    final height = _rowMetrics.heightOf(row);
+
+    final width = span == 1
+        ? _columnLayout.widths[column]
+        : _columnLayout.offsets[column + span] - _columnLayout.offsets[column];
+    final indent = column == 0 ? (_rowIndent?.call(row) ?? 0.0) : 0.0;
+    final available = width - padding.horizontal - indent;
+    if (available <= 0) return;
+    final availableHeight = height - padding.vertical;
+    if (availableHeight <= 0) return;
+
+    final cell = _cellFor(row, column, available, availableHeight);
+    final leadingEdge = offset.dx + _screenLeft(column);
+    // Under RTL a span grows leftwards from its own column, so its box starts
+    // where the last covered column does.
+    final rtl = _textDirection == TextDirection.rtl;
+    final left = rtl
+        ? leadingEdge + _columnLayout.widths[column] - width
+        : leadingEdge;
+
+    final contentWidth = cell.painter.width + cell.iconAdvance;
+    final free = available - contentWidth;
+    // The indent belongs on the leading edge. Under RTL that is the right, and
+    // the reduced `available` above has already put it there — adding it here
+    // as well would count it twice.
+    final leading = padding.left + (rtl ? 0.0 : indent);
+    final inset = switch (_resolvedAlignment(cell.spec.alignment)) {
+      FitGridAlignment.start => leading,
+      FitGridAlignment.center => leading + math.max(0, free) / 2,
+      FitGridAlignment.end => leading + math.max(0, free),
+    };
+    final contentLeft = left + inset;
+    final textLeft = rtl ? contentLeft : contentLeft + cell.iconAdvance;
+    final origin = Offset(textLeft, top + (height - cell.painter.height) / 2);
+    final cellRect = Rect.fromLTWH(left, top, width, height);
+
+    // A cell that still does not fit — one line taller than the whole row, say
+    // — is clipped to its own box rather than allowed to paint over its
+    // neighbours. The save/restore is skipped in the overwhelmingly common case
+    // where the text already fits, because this runs per cell per frame of a
+    // scroll.
+    final needsClip = cell.overflows;
+    if (needsClip) {
+      canvas
+        ..save()
+        ..clipRect(cellRect);
+    }
+
+    if (cell.icon != null) {
+      final iconLeft = rtl
+          ? contentLeft + contentWidth - cell.iconAdvance
+          : contentLeft;
+      cell.icon!.paint(
+        canvas,
+        Offset(iconLeft, top + (height - cell.icon!.height) / 2),
+      );
+    }
+
+    if (cell.hasHighlights) _paintHighlights(canvas, cell, origin);
+
+    if (cell.faded) {
+      canvas
+        ..save()
+        ..translate(origin.dx, origin.dy);
+      cell.painter.paint(canvas, Offset.zero);
+      canvas.restore();
+    } else {
+      cell.painter.paint(canvas, origin);
+    }
+    if (needsClip) canvas.restore();
+    _byCell[_cellKey(row, column)] = cell;
   }
 
   /// A wash behind the characters a search matched.
@@ -1038,10 +1051,13 @@ class RenderFitGridSection extends RenderBox
     );
   }
 
-  /// Resolves a column's alignment against the text direction, so `start`
-  /// means "leading edge" rather than "left".
-  FitGridAlignment _resolvedAlignment(int column) {
-    final alignment = _paintColumns[column].alignment;
+  /// Resolves an alignment against the text direction, so `start` means
+  /// "leading edge" rather than "left".
+  ///
+  /// Taken from the cell's spec rather than its column, because a merged cell
+  /// spanning from a centred column is not thereby centred — a group header
+  /// beginning in the checkbox column still reads left to right.
+  FitGridAlignment _resolvedAlignment(FitGridAlignment alignment) {
     if (_textDirection == TextDirection.ltr) return alignment;
     return switch (alignment) {
       FitGridAlignment.start => FitGridAlignment.end,
@@ -1137,9 +1153,10 @@ class RenderFitGridSection extends RenderBox
     layOut(spec.style);
 
     final textWidth = math.max(0.0, maxWidth - iconAdvance);
-    var truncated =
+    final truncated =
         painter.didExceedMaxLines ||
         painter.maxIntrinsicWidth > textWidth + 0.5;
+    var faded = false;
 
     // The fade is cut into the glyphs themselves, by painting them through an
     // alpha gradient, rather than by erasing them afterwards with `dstOut`.
@@ -1166,7 +1183,7 @@ class RenderFitGridSection extends RenderBox
               ),
           ),
         );
-        truncated = true;
+        faded = true;
       }
     }
 
@@ -1178,6 +1195,7 @@ class RenderFitGridSection extends RenderBox
       maxWidth: maxWidth,
       maxHeight: maxHeight,
       truncated: truncated,
+      faded: faded,
       // Whole lines are all the budget above can trim. A single line taller
       // than the row it sits in has nowhere left to go, and gets clipped.
       overflows:
@@ -1508,6 +1526,7 @@ class _CachedCell {
     required this.maxWidth,
     required this.maxHeight,
     required this.truncated,
+    required this.faded,
     required this.overflows,
   });
 
@@ -1526,6 +1545,14 @@ class _CachedCell {
   /// Whether any of the cell's text was dropped — by an ellipsis, by the line
   /// cap, or by running past the column edge.
   final bool truncated;
+
+  /// Whether the glyphs carry the fade gradient.
+  ///
+  /// A shader is resolved in canvas coordinates, so a faded cell has to be
+  /// painted with the canvas translated to its own origin — otherwise the ramp
+  /// sits wherever the section's top-left happens to be, and the text comes out
+  /// entirely transparent.
+  final bool faded;
 
   /// Whether the laid-out text still exceeds its box and so has to be clipped
   /// at paint time.

@@ -28,6 +28,14 @@ export 'src/model/column_width.dart'
         FitGridFitHeaderWidth,
         FitGridFixedWidth,
         FitGridFlexWidth;
+export 'src/export/fitgrid_export.dart'
+    show
+        FitGridExportData,
+        FitGridExportRow,
+        buildFitGridExport,
+        fitGridToCsv,
+        fitGridToDelimited,
+        fitGridToTsv;
 export 'src/model/data_source.dart'
     show
         FitGridAsyncDataSource,
@@ -62,7 +70,12 @@ export 'src/model/fitgrid_column.dart'
         FitGridColumn,
         FitGridRowPredicate;
 export 'src/model/row_model.dart'
-    show FitGridDisplayRow, FitGridGroup, FitGridTree;
+    show
+        FitGridDisplayRow,
+        FitGridGroup,
+        FitGridTree,
+        flattenGroups,
+        flattenTree;
 export 'src/model/rows_view.dart' show FitGridRowsView;
 export 'src/model/row_height.dart'
     show FitGridContentRowHeight, FitGridFixedRowHeight, FitGridRowHeight;

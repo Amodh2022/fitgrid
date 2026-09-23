@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../model/enums.dart';
+import '../export/fitgrid_export.dart';
 import '../model/fitgrid_column.dart';
 import '../sizing/column_order.dart';
 import 'fitgrid_editing.dart';
@@ -442,6 +443,25 @@ class FitGridController<T> {
     if (column == null || !column.sortable) return;
     data.sort(columnId, data.nextDirectionFor(columnId), column.compare);
   }
+
+  /// The grid's contents in the shape an exporter wants.
+  ///
+  /// What is on screen, not what was handed in: the filter, the sort and the
+  /// column order all apply, because an export that ignored them would not be
+  /// the table the user is looking at. Pass [selectedOnly] to narrow it to the
+  /// selection.
+  ///
+  /// Turn the result into a file with `fitGridToCsv`, `fitGridToTsv`, or your
+  /// own writer — see [FitGridExportData] for why the formats are not in here.
+  FitGridExportData export({
+    bool selectedOnly = false,
+    bool includeHeaders = true,
+  }) => buildFitGridExport<T>(
+    columns: columns.visible,
+    rows: data.view,
+    only: selectedOnly ? selection.selected : null,
+    includeHeaders: includeHeaders,
+  );
 
   /// Moves a column so that it sits where [targetId] is now.
   ///
