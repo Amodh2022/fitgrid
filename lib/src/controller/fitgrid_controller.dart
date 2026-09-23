@@ -11,6 +11,7 @@ import 'fitgrid_focus.dart';
 import 'fitgrid_grouping.dart';
 import 'fitgrid_pagination.dart';
 import 'fitgrid_range.dart';
+import 'fitgrid_saved_state.dart';
 
 /// Rows, and the ordering applied to them.
 ///
@@ -285,6 +286,60 @@ class FitGridColumnState<T> extends ChangeNotifier {
     final index = _columns.indexWhere((column) => column.id == id);
     if (index < 0 || _columns[index].freeze == freeze) return;
     _columns[index] = _columns[index].copyWith(freeze: freeze);
+    _invalidate();
+    notifyListeners();
+  }
+
+  /// Applies a saved layout in one step — one rebuild, one re-measure —
+  /// rather than a notification per column.
+  ///
+  /// Ids that no longer exist are ignored. Columns the saved [order] does not
+  /// mention keep the position they were declared in, and the mentioned ones
+  /// are arranged among the remaining places in the saved order: a column
+  /// added in an app update appears where its author put it rather than
+  /// tacked on the end.
+  void applyLayout({
+    List<String> order = const <String>[],
+    Set<String>? hidden,
+    Map<String, FitGridFreeze> freezes = const <String, FitGridFreeze>{},
+    Map<String, double>? widths,
+  }) {
+    final known = <String>{for (final column in _columns) column.id};
+    final ranked = <String>[
+      for (final id in order)
+        if (known.contains(id)) id,
+    ];
+    if (ranked.length > 1) {
+      final rank = <String, int>{
+        for (var i = 0; i < ranked.length; i++) ranked[i]: i,
+      };
+      final slots = <int>[
+        for (var i = 0; i < _columns.length; i++)
+          if (rank.containsKey(_columns[i].id)) i,
+      ];
+      final moving = <FitGridColumn<T>>[for (final i in slots) _columns[i]]
+        ..sort((a, b) => rank[a.id]!.compareTo(rank[b.id]!));
+      for (var k = 0; k < slots.length; k++) {
+        _columns[slots[k]] = moving[k];
+      }
+    }
+    for (var i = 0; i < _columns.length; i++) {
+      final column = _columns[i];
+      final visible = hidden == null
+          ? column.visible
+          : !hidden.contains(column.id);
+      final freeze = freezes[column.id] ?? column.freeze;
+      if (visible != column.visible || freeze != column.freeze) {
+        _columns[i] = column.copyWith(visible: visible, freeze: freeze);
+      }
+    }
+    if (widths != null) {
+      _widthOverrides
+        ..clear()
+        ..addEntries(
+          widths.entries.where((entry) => known.contains(entry.key)),
+        );
+    }
     _invalidate();
     notifyListeners();
   }
@@ -590,6 +645,56 @@ class FitGridController<T> {
     only: selectedOnly ? selection.selected : null,
     includeHeaders: includeHeaders,
   );
+
+  /// A snapshot of the view — column layout, sort, filters, search and page —
+  /// for the app to keep and hand back to [restoreState] later.
+  ///
+  /// Only structured filters are saved: a predicate set through
+  /// `filter.setColumnFilter` is a closure, and there is no way to write one
+  /// down.
+  FitGridSavedState saveState() {
+    final all = columns.columns;
+    return FitGridSavedState(
+      columnOrder: <String>[for (final column in all) column.id],
+      hiddenColumns: <String>{
+        for (final column in all)
+          if (!column.visible) column.id,
+      },
+      frozenColumns: <String, FitGridFreeze>{
+        for (final column in all) column.id: column.freeze,
+      },
+      columnWidths: columns.widthOverrides,
+      sort: data.sortKeys,
+      filters: filter.filters,
+      query: filter.query,
+      pageSize: pagination.enabled ? pagination.pageSize : null,
+      pageIndex: pagination.enabled ? pagination.pageIndex : null,
+    );
+  }
+
+  /// Puts back a view saved by [saveState].
+  ///
+  /// Forgiving by design: a column that has been removed since, or renamed,
+  /// is skipped, and a sort or filter on it is dropped. Anything the state
+  /// does not mention is left as it is.
+  void restoreState(FitGridSavedState state) {
+    columns.applyLayout(
+      order: state.columnOrder,
+      hidden: state.columnOrder.isEmpty ? null : state.hiddenColumns,
+      freezes: state.frozenColumns,
+      widths: state.columnWidths,
+    );
+    setSort(state.sort);
+    filter.clearColumnFilters();
+    for (final entry in state.filters.entries) {
+      if (columns.byId(entry.key) != null) {
+        filter.setFilter(entry.key, entry.value);
+      }
+    }
+    filter.query = state.query;
+    if (state.pageSize != null) pagination.pageSize = state.pageSize!;
+    if (state.pageIndex != null) pagination.pageIndex = state.pageIndex!;
+  }
 
   /// Moves a column so that it sits where [targetId] is now.
   ///

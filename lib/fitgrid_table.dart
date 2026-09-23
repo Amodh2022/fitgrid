@@ -21,6 +21,7 @@ export 'src/controller/fitgrid_filter.dart' show FitGridFilterState;
 export 'src/controller/fitgrid_focus.dart' show FitGridFocusState;
 export 'src/controller/fitgrid_grouping.dart' show FitGridGroupingState;
 export 'src/controller/fitgrid_pagination.dart' show FitGridPaginationState;
+export 'src/controller/fitgrid_saved_state.dart' show FitGridSavedState;
 export 'src/controller/fitgrid_range.dart'
     show FitGridCellRange, FitGridCellRangeState;
 export 'src/model/column_filter.dart'
