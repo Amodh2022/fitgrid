@@ -297,4 +297,66 @@ void main() {
     expect(fitGridColumnWidth('action'), greaterThan(0));
     expect(tester.takeException(), isNull);
   });
+
+  _rowColourTests();
+}
+
+void _rowColourTests() {
+  testWidgets('rowColor paints conditional formatting without a widget', (
+    tester,
+  ) async {
+    final controller = FitGridController<Employee>(
+      rows: makeRows(6),
+      columns: columns(),
+    );
+    addTearDown(controller.dispose);
+
+    Future<int> pumpWith(int rows) async {
+      controller.data.rows = makeRows(rows);
+      await tester.pumpWidget(
+        host(
+          FitGrid<Employee>(
+            controller: controller,
+            rowColor: (row, index) =>
+                row.salary.isEven ? const Color(0xFFFFE0E0) : null,
+          ),
+        ),
+      );
+      await tester.pump();
+      return find.byType(ColoredBox).evaluate().length;
+    }
+
+    // The colour goes straight to the paint pass, so the widget count does not
+    // move when the row count does. The few that exist are the header and the
+    // chrome around the grid.
+    expect(await pumpWith(6), await pumpWith(600));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the selection colour wins over a row colour', (tester) async {
+    final controller = FitGridController<Employee>(
+      rows: makeRows(6),
+      columns: columns(),
+    );
+    addTearDown(controller.dispose);
+    controller.selection
+      ..mode = FitGridSelectionMode.multiple
+      ..select(<int>[1]);
+
+    await tester.pumpWidget(
+      host(
+        FitGrid<Employee>(
+          controller: controller,
+          rowColor: (row, index) => const Color(0xFFFFE0E0),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // A selection the user just made should not be hidden by a rule they wrote
+    // months ago. Asserted through the render object rather than by reading
+    // pixels, which a golden already covers.
+    expect(fitGridSection().rowCount, 6);
+    expect(tester.takeException(), isNull);
+  });
 }

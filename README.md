@@ -227,6 +227,23 @@ header beginning inside the checkbox column is still a sentence.
 Row indices stay global throughout. Collapsing a group does not renumber the
 rows below it, which is the part that is easy to get wrong.
 
+## Conditional formatting
+
+```dart
+FitGrid<Invoice>(
+  rows: invoices,
+  columns: columns,
+  rowColor: (invoice, index) => invoice.overdue ? Colors.red.shade50 : null,
+  // and per cell:
+  // FitGridColumn(..., cellStyle: (row, i) => row.overdue ? bold : null),
+)
+```
+
+The colour is handed to the paint pass, so flagging a thousand overdue rows
+costs a thousand `drawRect` calls rather than a thousand `Container`s. A
+selection wins where the two meet: a selection the user just made should not be
+hidden by a rule they wrote months ago.
+
 ## Overflow
 
 ```dart
@@ -399,6 +416,7 @@ wrapping column's width so the wrap point is stable, and prefer
 - Search with match highlighting, and per-column filters
 - Grouping, tree rows and merged cells over one flattening model
 - Aggregate footer, CSV/TSV export, context menus, column reordering
+- Conditional row and cell formatting, painted rather than built
 - Async data sources with a bounded page cache
 - Inline editing: one editor widget, validation, Enter/Escape/Tab
 - All four overflow policies, truncation-only tooltips

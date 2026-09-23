@@ -61,7 +61,8 @@ ship this".
   files — see the type's docs for why the format writers are not in here.
 - **Column reordering** by dragging a header, opt-in through
   `FitGrid.reorderableColumns`.
-- **Context menus** and a painted row hover.
+- **Context menus**, a painted row hover, and `FitGrid.rowColor` for conditional
+  formatting that costs a `drawRect` per row rather than a `Container`.
 
 ### Performance
 

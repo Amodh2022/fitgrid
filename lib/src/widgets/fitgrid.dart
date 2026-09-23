@@ -105,6 +105,7 @@ class FitGrid<T> extends StatefulWidget {
     this.autofocus = false,
     this.enableCopy = true,
     this.hoverHighlight = true,
+    this.rowColor,
     this.contextMenuBuilder,
     this.emptyState,
     this.loadingState,
@@ -250,6 +251,16 @@ class FitGrid<T> extends StatefulWidget {
 
   /// Whether the row under the pointer is highlighted. Painted, not built.
   final bool hoverHighlight;
+
+  /// A background for a row, or null to follow the striping.
+  ///
+  /// Conditional formatting without a widget: the colour is handed to the paint
+  /// pass, so flagging overdue rows in red costs a `drawRect` rather than a
+  /// `Container` per row. The index is into the full row list.
+  ///
+  /// The selection colour wins where the two meet, because a selection the user
+  /// made should not be hidden by a rule they wrote months ago.
+  final Color? Function(T row, int rowIndex)? rowColor;
 
   /// Builds the menu shown on a right-click or long-press. Returning null
   /// suppresses the menu for that target.
@@ -586,11 +597,12 @@ class _FitGridState<T> extends State<FitGrid<T>> {
 
     // Selection and taps speak in indices into the whole dataset, so they stay
     // meaningful when the user turns a page.
-    Color? rowColor(int rowIndex) {
+    Color? resolveRowColor(int rowIndex) {
       if (rowsView.isHeader(rowIndex)) return theme.groupHeaderBackground;
-      return selection.contains(rowsView.globalIndex(rowIndex))
-          ? theme.selectedBackground
-          : null;
+      final global = rowsView.globalIndex(rowIndex);
+      if (selection.contains(global)) return theme.selectedBackground;
+      final row = rowsView.rowAt(rowIndex);
+      return row == null ? null : widget.rowColor?.call(row, global);
     }
 
     final focusedCell = _focusedCellIn(columns, rowsView);
@@ -622,7 +634,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       rowMetrics: rowMetrics,
       vertical: vertical,
       horizontal: horizontal,
-      rowColor: rowColor,
+      rowColor: resolveRowColor,
       isRowSelected: (row) => selection.contains(rowsView.globalIndex(row)),
       striped: widget.striped,
       overscanRows: widget.overscanRows,
