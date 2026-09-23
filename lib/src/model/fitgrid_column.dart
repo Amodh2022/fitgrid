@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import 'column_filter.dart';
 import 'column_width.dart';
 import 'enums.dart';
 import 'fitgrid_editor.dart';
@@ -91,6 +92,7 @@ class FitGridColumn<T> {
     this.cellStyle,
     this.tooltip,
     this.editor,
+    this.filter,
   }) : assert(maxLines == null || maxLines > 0, 'maxLines must be positive');
 
   /// Stable identity for this column. Used as the key for widths, sort state,
@@ -205,6 +207,11 @@ class FitGridColumn<T> {
   /// open — see [FitGridEditor].
   final FitGridEditor<T>? editor;
 
+  /// Makes this column filterable from its column menu, and says what kind of
+  /// value it filters on. Null leaves it out of the filter UI — though a
+  /// predicate set through `FitGridFilterState.setColumnFilter` still applies.
+  final FitGridFilterSpec<T>? filter;
+
   /// Whether a cell in this column can be opened for editing.
   bool get isEditable => editor != null;
 
@@ -250,6 +257,7 @@ class FitGridColumn<T> {
     FitGridCellStyle<T>? cellStyle,
     String? tooltip,
     FitGridEditor<T>? editor,
+    FitGridFilterSpec<T>? filter,
   }) {
     return FitGridColumn<T>(
       id: id ?? this.id,
@@ -279,6 +287,7 @@ class FitGridColumn<T> {
       cellStyle: cellStyle ?? this.cellStyle,
       tooltip: tooltip ?? this.tooltip,
       editor: editor ?? this.editor,
+      filter: filter ?? this.filter,
     );
   }
 

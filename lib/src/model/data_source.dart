@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
@@ -53,7 +54,7 @@ class FitGridPageRequest {
           other.sortDirection == sortDirection &&
           listEquals(other.sortKeys, sortKeys) &&
           other.query == query &&
-          mapEquals(other.filters, filters);
+          jsonEncode(other.filters) == jsonEncode(filters);
 
   @override
   int get hashCode => Object.hash(
@@ -221,7 +222,10 @@ class FitGridAsyncDataSource<T> extends FitGridDataSource<T> {
 
   @override
   void filterBy(Map<String, Object?> filters) {
-    if (mapEquals(_filters, filters)) return;
+    // Compared as JSON: the values are nested maps, which `mapEquals` compares
+    // by identity, so every call would otherwise look like a new filter and
+    // throw the cache away.
+    if (jsonEncode(_filters) == jsonEncode(filters)) return;
     _filters = Map<String, Object?>.unmodifiable(filters);
     // Like a search, a filter changes the result set, so the count goes too.
     _rowCount = 0;

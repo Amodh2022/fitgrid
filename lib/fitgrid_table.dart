@@ -23,6 +23,12 @@ export 'src/controller/fitgrid_grouping.dart' show FitGridGroupingState;
 export 'src/controller/fitgrid_pagination.dart' show FitGridPaginationState;
 export 'src/controller/fitgrid_range.dart'
     show FitGridCellRange, FitGridCellRangeState;
+export 'src/model/column_filter.dart'
+    show
+        FitGridColumnFilter,
+        FitGridFilterKind,
+        FitGridFilterOperator,
+        FitGridFilterSpec;
 export 'src/model/column_width.dart'
     show
         FitGridAutoWidth,
@@ -94,6 +100,7 @@ export 'src/widgets/fitgrid_column_chooser.dart'
         FitGridColumnChooser,
         fitGridColumnChooserItems,
         showFitGridColumnDialog;
+export 'src/widgets/fitgrid_filter_dialog.dart' show showFitGridFilterDialog;
 export 'src/widgets/fitgrid_footer.dart' show FitGridFooter;
 export 'src/widgets/fitgrid_header.dart' show FitGridHeader;
 export 'src/widgets/fitgrid_intents.dart'

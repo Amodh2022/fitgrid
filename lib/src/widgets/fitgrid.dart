@@ -28,6 +28,7 @@ import '../sizing/row_sizer.dart';
 import '../theme/fitgrid_theme.dart';
 import 'fitgrid_cell_editor.dart';
 import 'fitgrid_column_chooser.dart';
+import 'fitgrid_filter_dialog.dart';
 import 'fitgrid_footer.dart';
 import 'fitgrid_header.dart';
 import 'fitgrid_intents.dart';
@@ -398,6 +399,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     _syncOwnedController();
     _syncPagination();
     _controller.selection.addListener(_onSelectionChanged);
+    _controller.filter.addListener(_forwardFilters);
     _controller.attachViewport(_reveal);
     widget.dataSource?.addListener(_onSourceChanged);
     _lastReportedSelection = _controller.selection.selected;
@@ -408,14 +410,17 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     super.didUpdateWidget(oldWidget);
     if (widget.controller != oldWidget.controller) {
       oldWidget.controller?.selection.removeListener(_onSelectionChanged);
+      oldWidget.controller?.filter.removeListener(_forwardFilters);
       oldWidget.controller?.attachViewport(null);
       _controller.selection.addListener(_onSelectionChanged);
+      _controller.filter.addListener(_forwardFilters);
       _controller.attachViewport(_reveal);
     }
     if (widget.dataSource != oldWidget.dataSource) {
       oldWidget.dataSource?.removeListener(_onSourceChanged);
       widget.dataSource?.addListener(_onSourceChanged);
       _sourceRevision++;
+      _forwardFilters();
     }
     if (widget.controller != oldWidget.controller ||
         !identical(widget.rows, oldWidget.rows) ||
@@ -467,6 +472,12 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     setState(() => _sourceRevision++);
   }
 
+  /// Hands the structured column filters to a data source, which filters for
+  /// itself for the same reason it sorts for itself.
+  void _forwardFilters() {
+    widget.dataSource?.filterBy(_controller.filter.filtersJson);
+  }
+
   void _onSelectionChanged() {
     final callback = widget.onSelectionChanged;
     if (callback == null) return;
@@ -480,6 +491,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   void dispose() {
     widget.dataSource?.removeListener(_onSourceChanged);
     _controller.selection.removeListener(_onSelectionChanged);
+    _controller.filter.removeListener(_forwardFilters);
     _controller.attachViewport(null);
     _sizer.dispose();
     _rowSizer.dispose();
@@ -800,6 +812,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
               onColumnMenu: widget.showColumnMenu
                   ? (id, anchor) => _openColumnMenu(anchor, id)
                   : null,
+              activeFilters: controller.filter.filteredColumnIds,
             ),
           ),
         Expanded(child: hoverable),
@@ -1183,12 +1196,31 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     );
   }
 
-  /// The column menu's filter entries. Empty until a column can be filtered.
+  /// The column menu's filter entries, for a column with a filter spec.
   List<PopupMenuEntry<void>> _filterMenuItems(
     FitGridColumn<T> column,
     FitGridThemeData theme,
     PopupMenuItem<void> Function(String, IconData?, VoidCallback?) item,
-  ) => const <PopupMenuEntry<void>>[];
+  ) {
+    if (column.filter == null) return const <PopupMenuEntry<void>>[];
+    final filter = _controller.filter;
+    final active = filter.filters.containsKey(column.id);
+    return <PopupMenuEntry<void>>[
+      item(
+        'Filter…',
+        active ? theme.filterActiveIcon : theme.filterIcon,
+        // After the menu has closed, for the same reason as "Columns…".
+        () => WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            showFitGridFilterDialog<T>(context, _controller, column.id);
+          }
+        }),
+      ),
+      if (active)
+        item('Clear filter', null, () => filter.setFilter(column.id, null)),
+      const PopupMenuDivider(),
+    ];
+  }
 
   // ------------------------------------------------------------- gestures
 
