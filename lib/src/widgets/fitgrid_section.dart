@@ -40,6 +40,7 @@ class FitGridSection extends RenderObjectWidget {
     this.focusedCell = (-1, -1),
     this.hoveredRow = -1,
     this.selectedRange = RenderFitGridSection.noRange,
+    this.dropLine = -1,
     this.rowIndexOffset = 0,
     this.cellSpan,
     this.rowIndent,
@@ -97,6 +98,9 @@ class FitGridSection extends RenderObjectWidget {
   /// The selected block of cells, inclusive, or [RenderFitGridSection.noRange].
   final (int, int, int, int) selectedRange;
 
+  /// Where a dragged row would be dropped, or -1.
+  final int dropLine;
+
   /// Added to a local row index to name it in the full dataset. Non-zero only
   /// when paginated, and used only by semantics.
   final int rowIndexOffset;
@@ -137,6 +141,7 @@ class FitGridSection extends RenderObjectWidget {
       focusedColumn: focusedCell.$2,
       hoveredRow: hoveredRow,
       selectedRange: selectedRange,
+      dropLine: dropLine,
       rowIndexOffset: rowIndexOffset,
       cellSpan: cellSpan,
       rowIndent: rowIndent,
@@ -169,6 +174,7 @@ class FitGridSection extends RenderObjectWidget {
       ..focusedCell = focusedCell
       ..hoveredRow = hoveredRow
       ..selectedRange = selectedRange
+      ..dropLine = dropLine
       ..rowIndexOffset = rowIndexOffset
       ..cellSpan = cellSpan
       ..rowIndent = rowIndent

@@ -128,6 +128,16 @@ class FitGridDataState<T> extends ChangeNotifier {
     };
   }
 
+  /// Moves the row at [from] so that it ends up at [to], both indices into
+  /// [rows] — the supplied order, not the view.
+  void moveRow(int from, int to) {
+    if (from == to || from < 0 || from >= _rows.length) return;
+    final row = _rows.removeAt(from);
+    _rows.insert(to.clamp(0, _rows.length), row);
+    _view = null;
+    notifyListeners();
+  }
+
   List<T> _buildView() {
     final filter = _filter;
     // An unfiltered, unsorted grid hands back the original list rather than a

@@ -115,6 +115,7 @@ export 'src/widgets/fitgrid_intents.dart'
         FitGridDismissIntent,
         FitGridJumpIntent,
         FitGridMoveIntent,
+        FitGridMoveRowIntent,
         FitGridPageIntent,
         FitGridPasteIntent,
         FitGridSelectAllIntent,

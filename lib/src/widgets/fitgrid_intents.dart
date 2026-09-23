@@ -74,6 +74,14 @@ class FitGridClearCellsIntent extends Intent {
   const FitGridClearCellsIntent();
 }
 
+/// Moves the focused row up or down, when rows are reorderable.
+class FitGridMoveRowIntent extends Intent {
+  const FitGridMoveRowIntent(this.delta);
+
+  /// -1 to move up a row, 1 to move down.
+  final int delta;
+}
+
 /// Clears the selection, or closes an open editor.
 class FitGridDismissIntent extends Intent {
   const FitGridDismissIntent();
@@ -159,6 +167,12 @@ kFitGridShortcuts = <ShortcutActivator, Intent>{
   SingleActivator(LogicalKeyboardKey.keyV, meta: true): FitGridPasteIntent(),
   SingleActivator(LogicalKeyboardKey.delete): FitGridClearCellsIntent(),
   SingleActivator(LogicalKeyboardKey.backspace): FitGridClearCellsIntent(),
+
+  SingleActivator(LogicalKeyboardKey.arrowUp, alt: true): FitGridMoveRowIntent(
+    -1,
+  ),
+  SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
+      FitGridMoveRowIntent(1),
 
   SingleActivator(LogicalKeyboardKey.escape): FitGridDismissIntent(),
 };

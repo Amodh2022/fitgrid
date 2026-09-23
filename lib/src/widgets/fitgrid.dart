@@ -103,6 +103,8 @@ class FitGrid<T> extends StatefulWidget {
     this.multiSort = true,
     this.showColumnMenu = false,
     this.columnGroups = const <FitGridColumnGroup>[],
+    this.reorderableRows = false,
+    this.onRowReorder,
     this.onLoadMore,
     this.hasMoreRows = true,
     this.loadMoreThreshold = 10,
@@ -152,6 +154,10 @@ class FitGrid<T> extends StatefulWidget {
   /// The id of the built-in column that opens and closes detail panels.
   /// Reserved, like [selectionColumnId].
   static const String detailColumnId = '__fitgrid_detail';
+
+  /// The id of the built-in drag-handle column of [reorderableRows].
+  /// Reserved, like [selectionColumnId].
+  static const String dragColumnId = '__fitgrid_drag';
 
   /// Rows to display. Ignored when [controller] or [dataSource] is supplied.
   final List<T> rows;
@@ -229,6 +235,23 @@ class FitGrid<T> extends StatefulWidget {
   /// Membership is by column id, so a band follows its columns through a
   /// reorder, and splits into one band per run if its columns are separated.
   final List<FitGridColumnGroup> columnGroups;
+
+  /// Adds a pinned drag-handle column: drag a row by its handle to move it,
+  /// or press Alt+Up / Alt+Down on the focused row.
+  ///
+  /// Moving rows only means something when their order is the order they
+  /// were given in, so dragging is off while the grid is sorted or grouped,
+  /// and not available with a [dataSource]. The handles dim to say so.
+  final bool reorderableRows;
+
+  /// Called when the user moves a row, with its index before and after the
+  /// move, both into the rows as displayed.
+  ///
+  /// When null, the grid moves the row in [FitGridController.data] itself.
+  /// When set, the grid leaves the rows alone and the host reorders its own
+  /// list — which a host passing [rows] must do, or the next rebuild would
+  /// put them back.
+  final void Function(int from, int to)? onRowReorder;
 
   /// Called when the user scrolls to within [loadMoreThreshold] rows of the
   /// end, to fetch the next batch — infinite scrolling.
@@ -712,6 +735,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         ),
     ];
 
+    final canReorder = _canReorderRows;
+
     // Identity of the row list changes whenever the data or the sort changes,
     // which is exactly when painted text could be stale. The selection revision
     // and the search query join it because both change what a cell paints
@@ -726,6 +751,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       _sourceRevision,
       controller.details.revision,
       _loadingMore,
+      canReorder,
     );
 
     final pageOffset = rowsView.offset;
@@ -769,6 +795,23 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         return line != null && line.isDetail ? blank : FitGridCellSpec.loading;
       }
       final globalRow = rowsView.globalIndex(rowIndex);
+
+      if (column.id == FitGrid.dragColumnId) {
+        return FitGridCellSpec(
+          text: '',
+          style: theme.cellTextStyle,
+          alignment: FitGridAlignment.center,
+          overflow: FitGridOverflow.clip,
+          icon: theme.rowDragHandleIcon,
+          iconColor: canReorder
+              ? theme.sortIconColor
+              : theme.placeholderForeground.withValues(alpha: 0.3),
+          iconSize: theme.sortIconSize,
+          semanticLabel: canReorder
+              ? 'Drag to move, or press Alt and an arrow key'
+              : 'Row order is fixed while sorted or grouped',
+        );
+      }
 
       if (column.id == FitGrid.detailColumnId) {
         final open = _controller.details.isExpanded(_detailKey(row));
@@ -912,7 +955,12 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       editingCell: _editingCellIn(columns, controller, rowsView),
       selectedRange: _localRange(columns, rowsView),
       focusedCell: focusedCell,
-      hoveredRow: widget.hoverHighlight ? _hoveredRow : -1,
+      hoveredRow: _rowDragFrom != null
+          ? rowsView.localIndex(_rowDragFrom!)
+          : widget.hoverHighlight
+          ? _hoveredRow
+          : -1,
+      dropLine: _rowDropLine,
       rowIndexOffset: pageOffset,
       cellSpan: rowsView.displayAt == null
           ? null
@@ -1081,17 +1129,21 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   List<FitGridColumn<T>> _resolveColumns(FitGridThemeData theme) {
     final base = _controller.columns.visible;
     final showDetails = _detailsEnabled;
+    final showDrag = widget.reorderableRows && widget.dataSource == null;
     final key = Object.hash(
       identityHashCode(base),
       widget.showSelectionColumn,
       showDetails,
+      showDrag,
       theme.selectionColumnWidth,
+      theme.rowDragHandleWidth,
     );
     final cached = _displayColumns;
     if (cached != null && _displayColumnsKey == key) return cached;
 
-    final resolved = widget.showSelectionColumn || showDetails
+    final resolved = widget.showSelectionColumn || showDetails || showDrag
         ? <FitGridColumn<T>>[
+            if (showDrag) _dragColumn(theme),
             if (widget.showSelectionColumn) _selectionColumn(theme),
             if (showDetails) _detailColumn(theme),
             ...base,
@@ -1116,6 +1168,29 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   /// controls, not data: they are never copied, pasted into or selected.
   static bool _isSynthetic(FitGridColumn<Object?> column) =>
       _isSyntheticId(column.id);
+
+  FitGridColumn<T> _dragColumn(FitGridThemeData theme) => FitGridColumn<T>(
+    id: FitGrid.dragColumnId,
+    label: '',
+    value: (_) => '',
+    width: FitGridColumnWidth.fixed(theme.rowDragHandleWidth),
+    alignment: FitGridAlignment.center,
+    freeze: FitGridFreeze.start,
+    resizable: false,
+    reorderable: false,
+    sortable: false,
+    searchable: false,
+    hideable: false,
+  );
+
+  /// Whether rows can be moved right now: they must be in the order they were
+  /// given in, which a sort or a grouping has replaced with an order of its
+  /// own.
+  bool get _canReorderRows =>
+      widget.reorderableRows &&
+      widget.dataSource == null &&
+      _controller.data.sortKeys.isEmpty &&
+      !_controller.grouping.isActive;
 
   FitGridColumn<T> _detailColumn(FitGridThemeData theme) => FitGridColumn<T>(
     id: FitGrid.detailColumnId,
@@ -1524,6 +1599,36 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     required FitGridThemeData theme,
     required Widget child,
   }) {
+    final gestures = _wrapTapGestures(
+      context: context,
+      columns: columns,
+      rows: rows,
+      child: child,
+    );
+    if (!widget.reorderableRows || widget.dataSource != null) return gestures;
+    return RawGestureDetector(
+      gestures: <Type, GestureRecognizerFactory>{
+        _RowDragRecognizer:
+            GestureRecognizerFactoryWithHandlers<_RowDragRecognizer>(
+              () => _RowDragRecognizer(),
+              (recognizer) => recognizer
+                ..claims = ((position) =>
+                    _rowDragStart(position, columns, rows))
+                ..onUpdate = ((position) => _rowDragUpdate(position, rows))
+                ..onEnd = (() => _rowDragEnd(rows))
+                ..onCancel = _rowDragCancel,
+            ),
+      },
+      child: gestures,
+    );
+  }
+
+  Widget _wrapTapGestures({
+    required BuildContext context,
+    required List<FitGridColumn<T>> columns,
+    required FitGridRowsView<T> rows,
+    required Widget child,
+  }) {
     final wantsTapEdit =
         widget.editTrigger == FitGridEditTrigger.singleTap &&
         columns.any((column) => column.isEditable);
@@ -1655,6 +1760,118 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     if (openEditor) _beginEdit(globalPosition, columns, rows);
     widget.onRowTap?.call(row, globalRow);
     widget.onCellTap?.call(row, globalRow, column.id);
+  }
+
+  /// The row being dragged, by index into the rows as displayed, or null.
+  int? _rowDragFrom;
+
+  /// The line the drop indicator is drawn above, or -1.
+  int _rowDropLine = -1;
+
+  /// Starts a row drag if the press landed on a drag handle and rows can be
+  /// moved. Returning false leaves the pointer to everything else — the
+  /// scroll view, the taps — so a press anywhere but a handle behaves as it
+  /// always did.
+  bool _rowDragStart(
+    Offset globalPosition,
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows,
+  ) {
+    if (!_canReorderRows) return false;
+    final hit = _cellAt(globalPosition, columns, rows);
+    if (hit == null) return false;
+    final (local, column) = hit;
+    if (columns[column].id != FitGrid.dragColumnId) return false;
+    if (rows.rowAt(local) == null) return false;
+    setState(() {
+      _rowDragFrom = rows.globalIndex(local);
+      _rowDropLine = local;
+    });
+    return true;
+  }
+
+  void _rowDragUpdate(Offset globalPosition, FitGridRowsView<T> rows) {
+    final render = _sectionKey.currentContext?.findRenderObject();
+    if (render is! RenderFitGridSection || _rowDragFrom == null) return;
+    _autoScrollForDrag(globalPosition);
+    final local = render.globalToLocal(globalPosition);
+    final y = local.dy + render.verticalOffset;
+    int line;
+    if (y <= 0) {
+      line = 0;
+    } else if (y >= render.contentHeight) {
+      line = rows.length;
+    } else {
+      line = render.rowMetrics.clampedRowAt(y);
+      // The lower half of a row means "after it".
+      final top = render.rowOffsetAt(line);
+      if (y - top > render.rowHeightAt(line) / 2) line++;
+    }
+    if (line != _rowDropLine) setState(() => _rowDropLine = line);
+  }
+
+  void _rowDragEnd(FitGridRowsView<T> rows) {
+    final from = _rowDragFrom;
+    final line = _rowDropLine;
+    _rowDragCancel();
+    if (from == null || line < 0) return;
+    final before = _indexBeforeLine(line, rows);
+    // Dropping below its own position counts the row itself among those it
+    // passes, which is one too many once it has left its old place.
+    final to = before > from ? before - 1 : before;
+    if (to != from) _reorderRow(from, to);
+  }
+
+  void _rowDragCancel() {
+    if (_rowDragFrom == null && _rowDropLine < 0) return;
+    setState(() {
+      _rowDragFrom = null;
+      _rowDropLine = -1;
+    });
+  }
+
+  /// The index, into the rows as displayed, of the first row at or after
+  /// display line [line] — the row a drop there would land in front of.
+  /// Detail panels between rows are stepped over.
+  int _indexBeforeLine(int line, FitGridRowsView<T> rows) {
+    for (var i = line; i < rows.length; i++) {
+      if (rows.rowAt(i) != null) return rows.globalIndex(i);
+    }
+    return _controller.data.length;
+  }
+
+  /// Moves a row and carries the selection and the focus along with it.
+  void _reorderRow(int from, int to) {
+    final data = _controller.data;
+    final callback = widget.onRowReorder;
+    if (callback != null) {
+      callback(from, to);
+    } else {
+      final view = data.view;
+      if (from < 0 || from >= view.length || to < 0 || to >= view.length) {
+        return;
+      }
+      // Moved among the supplied rows, next to the row it was dropped on, so
+      // a filter hiding rows in between does not decide where it lands.
+      final all = data.rows;
+      data.moveRow(all.indexOf(view[from]), all.indexOf(view[to]));
+    }
+
+    int follow(int i) {
+      if (i == from) return to;
+      if (from < to && i > from && i <= to) return i - 1;
+      if (to < from && i >= to && i < from) return i + 1;
+      return i;
+    }
+
+    final selection = _controller.selection;
+    if (selection.isNotEmpty) {
+      selection.select(<int>[for (final i in selection.selected) follow(i)]);
+    }
+    final focus = _controller.focus;
+    if (focus.hasFocus) {
+      focus.moveTo(follow(focus.rowIndex!), focus.columnId!);
+    }
   }
 
   /// The pointer dragging out a range, or null.
@@ -2051,6 +2268,19 @@ class _FitGridState<T> extends State<FitGrid<T>> {
           _controller.range.select(range.anchorRow, range.anchorColumnId);
         } else {
           _controller.selection.clear();
+        }
+        return null;
+      },
+    ),
+    FitGridMoveRowIntent: _GridAction<FitGridMoveRowIntent>(
+      enabled: () => _gridHasKeyboard() && _canReorderRows,
+      onInvoke: (intent) {
+        final row = _controller.focus.rowIndex;
+        if (row == null) return null;
+        final to = (row + intent.delta).clamp(0, _controller.data.length - 1);
+        if (to != row) {
+          _reorderRow(row, to);
+          _controller.scrollTo(to, columnId: _controller.focus.columnId);
         }
         return null;
       },
@@ -3036,4 +3266,55 @@ class _GridAction<I extends Intent> extends CallbackAction<I> {
 
   @override
   bool isEnabled(I intent) => enabled();
+}
+
+/// Claims a pointer the moment it lands on a row's drag handle.
+///
+/// The scroll view underneath would otherwise take the drag as a scroll: both
+/// want vertical movement, and in the arena the first to see the slop crossed
+/// wins. Claiming on pointer-down — for handle presses only — settles it
+/// before the scroll view has a chance, while every other press is never
+/// tracked at all and reaches the scroll view and the taps untouched.
+class _RowDragRecognizer extends OneSequenceGestureRecognizer {
+  /// Asked on pointer-down whether to take this pointer; starts the drag if so.
+  bool Function(Offset globalPosition) claims = _never;
+  void Function(Offset globalPosition) onUpdate = _ignore;
+  VoidCallback onEnd = _nothing;
+  VoidCallback onCancel = _nothing;
+
+  static bool _never(Offset _) => false;
+  static void _ignore(Offset _) {}
+  static void _nothing() {}
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    if (!claims(event.position)) return;
+    super.addAllowedPointer(event);
+    resolve(GestureDisposition.accepted);
+  }
+
+  @override
+  void handleEvent(PointerEvent event) {
+    if (event is PointerMoveEvent) {
+      onUpdate(event.position);
+    } else if (event is PointerUpEvent) {
+      onEnd();
+      stopTrackingPointer(event.pointer);
+    } else if (event is PointerCancelEvent) {
+      onCancel();
+      stopTrackingPointer(event.pointer);
+    }
+  }
+
+  @override
+  void rejectGesture(int pointer) {
+    onCancel();
+    super.rejectGesture(pointer);
+  }
+
+  @override
+  void didStopTrackingLastPointer(int pointer) {}
+
+  @override
+  String get debugDescription => 'fitgrid row drag';
 }

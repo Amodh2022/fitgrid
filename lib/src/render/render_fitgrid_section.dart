@@ -108,6 +108,7 @@ class RenderFitGridSection extends RenderBox
     int focusedColumn = -1,
     int hoveredRow = -1,
     (int, int, int, int) selectedRange = noRange,
+    int dropLine = -1,
     int rowIndexOffset = 0,
     FitGridCellSpanResolver? cellSpan,
     FitGridRowIndentResolver? rowIndent,
@@ -133,6 +134,7 @@ class RenderFitGridSection extends RenderBox
        _focusedColumn = focusedColumn,
        _hoveredRow = hoveredRow,
        _selectedRange = selectedRange,
+       _dropLine = dropLine,
        _rowIndexOffset = rowIndexOffset,
        _cellSpan = cellSpan,
        _rowIndent = rowIndent,
@@ -416,6 +418,18 @@ class RenderFitGridSection extends RenderBox
     _selectedRange = value;
     markNeedsPaint();
     markNeedsSemanticsUpdate();
+  }
+
+  int _dropLine;
+
+  /// Where a dragged row would land: a line is drawn along the top edge of
+  /// this row, or along the bottom of the last row when it equals the row
+  /// count. -1 draws nothing.
+  int get dropLine => _dropLine;
+  set dropLine(int value) {
+    if (_dropLine == value) return;
+    _dropLine = value;
+    markNeedsPaint();
   }
 
   bool _inRange(int row, int column) {
@@ -811,9 +825,20 @@ class RenderFitGridSection extends RenderBox
     }
 
     _paintSpans(canvas, offset);
+    _paintDropLine(canvas, offset);
     canvas.restore();
     _pruneCache();
     _paintChildren(context, offset);
+  }
+
+  void _paintDropLine(Canvas canvas, Offset offset) {
+    if (_dropLine < 0 || _dropLine > rowCount) return;
+    final y = offset.dy + _rowMetrics.offsetOf(_dropLine) - _verticalOffset;
+    final stroke = _theme.focusRingWidth;
+    canvas.drawRect(
+      Rect.fromLTWH(offset.dx, y - stroke / 2, size.width, stroke),
+      Paint()..color = _theme.focusOutline,
+    );
   }
 
   /// Which band a column is painted in: 0 leading pinned, 1 scrolling, 2
