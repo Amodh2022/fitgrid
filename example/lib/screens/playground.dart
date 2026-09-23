@@ -1,59 +1,20 @@
-import 'package:fitgrid/fitgrid.dart';
+import 'package:fitgrid_table/fitgrid_table.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'employee.dart';
+import '../data/employee.dart';
+import '../shared/demo_page.dart';
 
-void main() => runApp(const ExampleApp());
-
-class ExampleApp extends StatefulWidget {
-  const ExampleApp({super.key});
-
-  @override
-  State<ExampleApp> createState() => _ExampleAppState();
-}
-
-class _ExampleAppState extends State<ExampleApp> {
-  ThemeMode _themeMode = ThemeMode.light;
+/// Every switch at once, over one grid — the place to try combinations the
+/// focused examples keep apart.
+class PlaygroundScreen extends StatefulWidget {
+  const PlaygroundScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'fitgrid',
-      debugShowCheckedModeBanner: false,
-      themeMode: _themeMode,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: const Color(0xFF3B6EA5),
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        colorSchemeSeed: const Color(0xFF3B6EA5),
-      ),
-      home: ExamplePage(
-        themeMode: _themeMode,
-        onThemeModeChanged: (mode) => setState(() => _themeMode = mode),
-      ),
-    );
-  }
+  State<PlaygroundScreen> createState() => _PlaygroundScreenState();
 }
 
-class ExamplePage extends StatefulWidget {
-  const ExamplePage({
-    required this.themeMode,
-    required this.onThemeModeChanged,
-    super.key,
-  });
-
-  final ThemeMode themeMode;
-  final ValueChanged<ThemeMode> onThemeModeChanged;
-
-  @override
-  State<ExamplePage> createState() => _ExamplePageState();
-}
-
-class _ExamplePageState extends State<ExamplePage> {
+class _PlaygroundScreenState extends State<PlaygroundScreen> {
   static const _rowCounts = [100, 1000, 10000, 100000];
 
   late FitGridController<Employee> _controller;
@@ -239,79 +200,73 @@ class _ExamplePageState extends State<ExamplePage> {
 
     return Directionality(
       textDirection: _rtl ? TextDirection.rtl : TextDirection.ltr,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('fitgrid'),
-          actions: [
-            IconButton(
-              tooltip: 'Toggle brightness',
-              icon: Icon(
-                widget.themeMode == ThemeMode.dark
-                    ? Icons.light_mode_outlined
-                    : Icons.dark_mode_outlined,
-              ),
-              onPressed: () => widget.onThemeModeChanged(
-                widget.themeMode == ThemeMode.dark
-                    ? ThemeMode.light
-                    : ThemeMode.dark,
-              ),
-            ),
-          ],
+      child: DemoPage(
+        title: 'Playground',
+        notes: const [
+          DemoNote(
+            'Every feature behind one set of switches. Try 100k rows with '
+            'grouping, freezing and search on together: the cost still tracks '
+            'the rows on screen, not the rows in the list.',
+          ),
+          DemoNote(
+            'Double-click a Name, Role or Salary cell to edit it. Drag a header '
+            'divider to resize, double-click it to re-fit, drag a header to '
+            'move the column.',
+          ),
+          DemoNote.recommended(
+            'Change what the grid shows through the controller, so the grid '
+            're-derives only what changed.',
+            code:
+                "controller.filter.query = 'designer';   // search\n"
+                'controller.grouping.groups = [...];     // grouping\n'
+                'controller.columns.autoSizeAll();       // re-fit widths',
+          ),
+        ],
+        controls: _Controls(
+          rowCount: _rowCount,
+          rowCounts: _rowCounts,
+          onRowCount: _setRowCount,
+          density: _density,
+          onDensity: (d) => setState(() => _density = d),
+          striped: _striped,
+          onStriped: (v) => setState(() => _striped = v),
+          stretch: _stretch,
+          onStretch: (v) => setState(() => _stretch = v),
+          rtl: _rtl,
+          onRtl: (v) => setState(() => _rtl = v),
+          wrapNotes: _wrapNotes,
+          onWrapNotes: _setWrapNotes,
+          freeze: _freeze,
+          onFreeze: (v) {
+            setState(() => _freeze = v);
+            _rebuildColumns();
+          },
+          grouped: _grouped,
+          onGrouped: _setGrouped,
+          selectable: _selectable,
+          onSelectable: (v) => setState(() => _selectable = v),
+          onSearch: (q) => _controller.filter.query = q,
+          onExport: _export,
+          // Drag a header divider to resize a column, or double-click it to
+          // re-fit that one. This does the same to all of them at once.
+          onResetWidths: _controller.columns.autoSizeAll,
+          paginated: _paginated,
+          onPaginated: (v) => setState(() => _paginated = v),
         ),
-        body: Column(
-          children: [
-            _Controls(
-              rowCount: _rowCount,
-              rowCounts: _rowCounts,
-              onRowCount: _setRowCount,
-              density: _density,
-              onDensity: (d) => setState(() => _density = d),
-              striped: _striped,
-              onStriped: (v) => setState(() => _striped = v),
-              stretch: _stretch,
-              onStretch: (v) => setState(() => _stretch = v),
-              rtl: _rtl,
-              onRtl: (v) => setState(() => _rtl = v),
-              wrapNotes: _wrapNotes,
-              onWrapNotes: _setWrapNotes,
-              freeze: _freeze,
-              onFreeze: (v) {
-                setState(() => _freeze = v);
-                _rebuildColumns();
-              },
-              grouped: _grouped,
-              onGrouped: _setGrouped,
-              selectable: _selectable,
-              onSelectable: (v) => setState(() => _selectable = v),
-              onSearch: (q) => _controller.filter.query = q,
-              onExport: _export,
-              // Drag a header divider to resize a column, or double-click it to
-              // re-fit that one. This does the same to all of them at once.
-              onResetWidths: _controller.columns.autoSizeAll,
-              paginated: _paginated,
-              onPaginated: (v) => setState(() => _paginated = v),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: FitGrid<Employee>(
-                  controller: _controller,
-                  theme: FitGridThemeData.fromTheme(theme, density: _density),
-                  striped: _striped,
-                  stretchColumnsToFill: _stretch,
-                  rowHeight: _wrapNotes
-                      ? const FitGridRowHeight.contentSized(min: 40, max: 120)
-                      : null,
-                  paginated: _paginated,
-                  selectionMode: _selectable
-                      ? FitGridSelectionMode.multiple
-                      : FitGridSelectionMode.none,
-                  showSelectionColumn: _selectable,
-                  reorderableColumns: true,
-                ),
-              ),
-            ),
-          ],
+        child: FitGrid<Employee>(
+          controller: _controller,
+          theme: FitGridThemeData.fromTheme(theme, density: _density),
+          striped: _striped,
+          stretchColumnsToFill: _stretch,
+          rowHeight: _wrapNotes
+              ? const FitGridRowHeight.contentSized(min: 40, max: 120)
+              : null,
+          paginated: _paginated,
+          selectionMode: _selectable
+              ? FitGridSelectionMode.multiple
+              : FitGridSelectionMode.none,
+          showSelectionColumn: _selectable,
+          reorderableColumns: true,
         ),
       ),
     );
@@ -373,108 +328,101 @@ class _Controls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Wrap(
-        spacing: 12,
-        runSpacing: 12,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          SegmentedButton<int>(
-            segments: [
-              for (final count in rowCounts)
-                ButtonSegment<int>(
-                  value: count,
-                  label: Text(count >= 1000 ? '${count ~/ 1000}k' : '$count'),
-                ),
-            ],
-            selected: {rowCount},
-            onSelectionChanged: (s) => onRowCount(s.first),
-            showSelectedIcon: false,
-          ),
-          SegmentedButton<FitGridDensity>(
-            segments: const [
-              ButtonSegment(
-                value: FitGridDensity.compact,
-                label: Text('Compact'),
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        SegmentedButton<int>(
+          segments: [
+            for (final count in rowCounts)
+              ButtonSegment<int>(
+                value: count,
+                label: Text(count >= 1000 ? '${count ~/ 1000}k' : '$count'),
               ),
-              ButtonSegment(
-                value: FitGridDensity.standard,
-                label: Text('Standard'),
-              ),
-              ButtonSegment(
-                value: FitGridDensity.comfortable,
-                label: Text('Comfortable'),
-              ),
-            ],
-            selected: {density},
-            onSelectionChanged: (s) => onDensity(s.first),
-            showSelectedIcon: false,
-          ),
-          FilterChip(
-            label: const Text('Striped'),
-            selected: striped,
-            onSelected: onStriped,
-          ),
-          FilterChip(
-            label: const Text('Stretch columns'),
-            selected: stretch,
-            onSelected: onStretch,
-          ),
-          FilterChip(
-            label: const Text('RTL'),
-            selected: rtl,
-            onSelected: onRtl,
-          ),
-          FilterChip(
-            label: const Text('Wrap notes'),
-            selected: wrapNotes,
-            onSelected: onWrapNotes,
-          ),
-          FilterChip(
-            label: const Text('Paginate'),
-            selected: paginated,
-            onSelected: onPaginated,
-          ),
-          FilterChip(
-            label: const Text('Freeze ends'),
-            selected: freeze,
-            onSelected: onFreeze,
-          ),
-          FilterChip(
-            label: const Text('Group by department'),
-            selected: grouped,
-            onSelected: onGrouped,
-          ),
-          FilterChip(
-            label: const Text('Selectable'),
-            selected: selectable,
-            onSelected: onSelectable,
-          ),
-          SizedBox(
-            width: 220,
-            child: TextField(
-              decoration: const InputDecoration(
-                isDense: true,
-                prefixIcon: Icon(Icons.search, size: 18),
-                hintText: 'Search',
-                border: OutlineInputBorder(),
-              ),
-              onChanged: onSearch,
+          ],
+          selected: {rowCount},
+          onSelectionChanged: (s) => onRowCount(s.first),
+          showSelectedIcon: false,
+        ),
+        SegmentedButton<FitGridDensity>(
+          segments: const [
+            ButtonSegment(
+              value: FitGridDensity.compact,
+              label: Text('Compact'),
             ),
+            ButtonSegment(
+              value: FitGridDensity.standard,
+              label: Text('Standard'),
+            ),
+            ButtonSegment(
+              value: FitGridDensity.comfortable,
+              label: Text('Comfortable'),
+            ),
+          ],
+          selected: {density},
+          onSelectionChanged: (s) => onDensity(s.first),
+          showSelectedIcon: false,
+        ),
+        FilterChip(
+          label: const Text('Striped'),
+          selected: striped,
+          onSelected: onStriped,
+        ),
+        FilterChip(
+          label: const Text('Stretch columns'),
+          selected: stretch,
+          onSelected: onStretch,
+        ),
+        FilterChip(label: const Text('RTL'), selected: rtl, onSelected: onRtl),
+        FilterChip(
+          label: const Text('Wrap notes'),
+          selected: wrapNotes,
+          onSelected: onWrapNotes,
+        ),
+        FilterChip(
+          label: const Text('Paginate'),
+          selected: paginated,
+          onSelected: onPaginated,
+        ),
+        FilterChip(
+          label: const Text('Freeze ends'),
+          selected: freeze,
+          onSelected: onFreeze,
+        ),
+        FilterChip(
+          label: const Text('Group by department'),
+          selected: grouped,
+          onSelected: onGrouped,
+        ),
+        FilterChip(
+          label: const Text('Selectable'),
+          selected: selectable,
+          onSelected: onSelectable,
+        ),
+        SizedBox(
+          width: 220,
+          child: TextField(
+            decoration: const InputDecoration(
+              isDense: true,
+              prefixIcon: Icon(Icons.search, size: 18),
+              hintText: 'Search',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: onSearch,
           ),
-          OutlinedButton.icon(
-            onPressed: onResetWidths,
-            icon: const Icon(Icons.straighten_outlined, size: 18),
-            label: const Text('Re-fit columns'),
-          ),
-          OutlinedButton.icon(
-            onPressed: onExport,
-            icon: const Icon(Icons.download_outlined, size: 18),
-            label: const Text('Copy as CSV'),
-          ),
-        ],
-      ),
+        ),
+        OutlinedButton.icon(
+          onPressed: onResetWidths,
+          icon: const Icon(Icons.straighten_outlined, size: 18),
+          label: const Text('Re-fit columns'),
+        ),
+        OutlinedButton.icon(
+          onPressed: onExport,
+          icon: const Icon(Icons.download_outlined, size: 18),
+          label: const Text('Copy as CSV'),
+        ),
+      ],
     );
   }
 }
