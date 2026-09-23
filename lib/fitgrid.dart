@@ -19,6 +19,7 @@ export 'src/controller/fitgrid_controller.dart'
 export 'src/controller/fitgrid_editing.dart' show FitGridEditingState;
 export 'src/controller/fitgrid_filter.dart' show FitGridFilterState;
 export 'src/controller/fitgrid_focus.dart' show FitGridFocusState;
+export 'src/controller/fitgrid_grouping.dart' show FitGridGroupingState;
 export 'src/controller/fitgrid_pagination.dart' show FitGridPaginationState;
 export 'src/model/column_width.dart'
     show
@@ -60,6 +61,8 @@ export 'src/model/fitgrid_column.dart'
         FitGridCellValue,
         FitGridColumn,
         FitGridRowPredicate;
+export 'src/model/row_model.dart'
+    show FitGridDisplayRow, FitGridGroup, FitGridTree;
 export 'src/model/rows_view.dart' show FitGridRowsView;
 export 'src/model/row_height.dart'
     show FitGridContentRowHeight, FitGridFixedRowHeight, FitGridRowHeight;

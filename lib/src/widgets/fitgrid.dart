@@ -13,6 +13,7 @@ import '../model/enums.dart';
 import '../model/fitgrid_column.dart';
 import '../model/fitgrid_editor.dart';
 import '../model/row_height.dart';
+import '../model/row_model.dart';
 import '../model/rows_view.dart';
 import '../render/cell_spec.dart';
 import '../render/render_fitgrid_section.dart';
@@ -317,6 +318,11 @@ class _FitGridState<T> extends State<FitGrid<T>> {
 
   int _hoveredRow = -1;
 
+  /// The flattened display lines, when grouping or a tree is on. Memoized:
+  /// flattening is O(rows) and a build happens on every scroll frame.
+  List<FitGridDisplayRow<T>>? _display;
+  Object? _displayKey;
+
   /// Bumped whenever an attached data source notifies, so everything keyed on
   /// the row view re-derives when rows arrive.
   int _sourceRevision = 0;
@@ -437,6 +443,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         controller.editing,
         controller.focus,
         controller.filter,
+        controller.grouping,
       ]),
       builder: (context, _) => LayoutBuilder(
         builder: (context, constraints) => _build(context, constraints),
@@ -516,9 +523,30 @@ class _FitGridState<T> extends State<FitGrid<T>> {
 
     FitGridCellSpec cellSpec(int rowIndex, int columnIndex) {
       final column = columns[columnIndex];
+      final line = rowsView.displayAt?.call(rowIndex);
+
+      // A group header is one merged cell carrying a disclosure glyph. It is an
+      // ordinary painted cell — the spanning and the indent are geometry, and
+      // the chevron is a character — so grouping adds no widgets at all.
+      if (line != null && line.isHeader) {
+        if (columnIndex != 0) return blank;
+        return FitGridCellSpec(
+          text: line.label!,
+          style: theme.groupHeaderTextStyle ?? theme.cellTextStyle,
+          alignment: FitGridAlignment.start,
+          overflow: FitGridOverflow.ellipsis,
+          icon: line.expanded ? theme.expandedIcon : theme.collapsedIcon,
+          iconColor: theme.headerForeground,
+          iconSize: theme.sortIconSize,
+          semanticLabel:
+              '${line.label}, '
+              '${line.expanded ? 'expanded' : 'collapsed'}',
+        );
+      }
+
       final row = rowsView.rowAt(rowIndex);
       if (row == null) return blank;
-      final globalRow = pageOffset + rowIndex;
+      final globalRow = rowsView.globalIndex(rowIndex);
 
       if (column.id == FitGrid.selectionColumnId) {
         final on = selection.contains(globalRow);
@@ -535,14 +563,19 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       }
 
       final text = column.value(row);
+      final disclosure = columnIndex == 0 && (line?.expandable ?? false)
+          ? (line!.expanded ? theme.expandedIcon : theme.collapsedIcon)
+          : null;
       return FitGridCellSpec(
         text: text,
         style: column.cellStyle?.call(row, globalRow) ?? theme.cellTextStyle,
         alignment: column.alignment,
         overflow: column.overflow,
         maxLines: column.maxLines,
-        icon: column.icon?.call(row, globalRow),
-        iconColor: column.iconColor?.call(row, globalRow),
+        icon: disclosure ?? column.icon?.call(row, globalRow),
+        iconColor: disclosure != null
+            ? theme.headerForeground
+            : column.iconColor?.call(row, globalRow),
         semanticLabel: column.semanticValue?.call(row),
         // Matches are computed only for the columns the search actually looks
         // at, and only while there is a query — a grid with an empty search box
@@ -553,11 +586,14 @@ class _FitGridState<T> extends State<FitGrid<T>> {
 
     // Selection and taps speak in indices into the whole dataset, so they stay
     // meaningful when the user turns a page.
-    Color? rowColor(int rowIndex) => selection.contains(pageOffset + rowIndex)
-        ? theme.selectedBackground
-        : null;
+    Color? rowColor(int rowIndex) {
+      if (rowsView.isHeader(rowIndex)) return theme.groupHeaderBackground;
+      return selection.contains(rowsView.globalIndex(rowIndex))
+          ? theme.selectedBackground
+          : null;
+    }
 
-    final focusedCell = _focusedCellIn(columns, pageOffset, rowsView.length);
+    final focusedCell = _focusedCellIn(columns, rowsView);
 
     final wantsTooltips = columns.any(
       (column) => column.overflow == FitGridOverflow.tooltipOnTruncate,
@@ -587,20 +623,27 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       vertical: vertical,
       horizontal: horizontal,
       rowColor: rowColor,
-      isRowSelected: (row) => selection.contains(pageOffset + row),
+      isRowSelected: (row) => selection.contains(rowsView.globalIndex(row)),
       striped: widget.striped,
       overscanRows: widget.overscanRows,
-      editingCell: _editingCellIn(
-        columns,
-        controller,
-        pageOffset,
-        rowsView.length,
-      ),
+      editingCell: _editingCellIn(columns, controller, rowsView),
       focusedCell: focusedCell,
       hoveredRow: widget.hoverHighlight ? _hoveredRow : -1,
       rowIndexOffset: pageOffset,
-      onCellActivate: (row, column) =>
-          _activateCell(pageOffset + row, columns[column], rowsView, row),
+      cellSpan: rowsView.displayAt == null
+          ? null
+          : (row, column) =>
+                column == 0 && rowsView.isHeader(row) ? columns.length : 1,
+      rowIndent: rowsView.displayAt == null
+          ? null
+          : (row) =>
+                (rowsView.displayAt!(row)?.depth ?? 0) * theme.nestingIndent,
+      onCellActivate: (row, column) => _activateCell(
+        rowsView.globalIndex(row),
+        columns[column],
+        rowsView,
+        row,
+      ),
       children: <Widget>[?editorChild],
     );
 
@@ -792,7 +835,94 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         identity: _SourceIdentity(source, _sourceRevision),
       );
     }
-    return _pageOf(_controller.data.view, _controller.pagination);
+    final rows = _controller.data.view;
+    final display = _resolveDisplay(rows);
+    if (display == null) return _pageOf(rows, _controller.pagination);
+    return _viewOfDisplay(rows, display, _controller.pagination);
+  }
+
+  /// A rows view over flattened display lines.
+  ///
+  /// Grouping folds collapsed rows out from between the visible ones, so the
+  /// mapping between "line 4 on screen" and "row 4 of the data" stops being
+  /// arithmetic. Both directions are looked up here, once, so that selection,
+  /// editing, focus and copy keep speaking in indices into the full row list
+  /// exactly as they do on a flat grid.
+  FitGridRowsView<T> _viewOfDisplay(
+    List<T> rows,
+    List<FitGridDisplayRow<T>> display,
+    FitGridPaginationState pagination,
+  ) {
+    final paged = widget.paginated && pagination.enabled;
+    final start = paged
+        ? math.min(pagination.firstRowIndex, display.length)
+        : 0;
+    final length = paged
+        ? math.min(pagination.pageSize, display.length - start)
+        : display.length;
+
+    final sourceToLocal = <int, int>{};
+    for (var i = 0; i < length; i++) {
+      final line = display[start + i];
+      if (!line.isHeader) sourceToLocal[line.sourceIndex] = i;
+    }
+
+    return FitGridRowsView<T>(
+      length: length,
+      offset: start,
+      rowAt: (index) =>
+          index < 0 || index >= length ? null : display[start + index].row,
+      displayAt: (index) =>
+          index < 0 || index >= length ? null : display[start + index],
+      globalIndexOf: (index) => index < 0 || index >= length
+          ? -1
+          : display[start + index].sourceIndex,
+      localIndexOf: (global) => sourceToLocal[global] ?? -1,
+      loaded: rows,
+      identity: _PageIdentity(display, start, length),
+    );
+  }
+
+  /// The display lines for the current rows, flattened through the grouping or
+  /// the tree.
+  ///
+  /// Returns null when neither is on, which is the signal for the rest of the
+  /// grid to take the plain path — a flat list should not pay for a feature it
+  /// is not using.
+  List<FitGridDisplayRow<T>>? _resolveDisplay(List<T> rows) {
+    final grouping = _controller.grouping;
+    if (!grouping.isActive) {
+      _display = null;
+      _displayKey = null;
+      return null;
+    }
+
+    final key = Object.hash(
+      identityHashCode(rows),
+      rows.length,
+      identityHashCode(grouping.groups),
+      identityHashCode(grouping.tree),
+      grouping.expansionRevision,
+    );
+    final cached = _display;
+    if (cached != null && _displayKey == key) return cached;
+
+    final tree = grouping.tree;
+    final lines = tree != null
+        ? flattenTree<T>(
+            rows: rows,
+            tree: tree,
+            isExpanded: grouping.isExpanded,
+            keyOf: (row) => identityHashCode(row),
+          )
+        : flattenGroups<T>(
+            rows: rows,
+            groups: grouping.groups,
+            isExpanded: grouping.isExpanded,
+          );
+    _display = lines;
+    _displayKey = key;
+    return lines;
   }
 
   /// Tells a data source what is on screen, once the frame that knows has been
@@ -888,10 +1018,32 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     final hit = _cellAt(globalPosition, columns, rows);
     if (hit == null) return;
     final (localRow, columnIndex) = hit;
+
+    // A group header is a control, not a row: it opens and closes, and it
+    // takes no part in the selection or in the tap callbacks.
+    final line = rows.displayAt?.call(localRow);
+    if (line != null && line.isHeader) {
+      _controller.grouping.toggle(line.groupKey!);
+      return;
+    }
+
     final row = rows.rowAt(localRow);
     if (row == null) return;
     final globalRow = rows.globalIndex(localRow);
     final column = columns[columnIndex];
+
+    // The disclosure triangle of a tree parent is in the leading inset of the
+    // first cell. Hitting it expands rather than selects.
+    if (line != null && line.expandable && columnIndex == 0) {
+      final render = _sectionKey.currentContext?.findRenderObject();
+      if (render is RenderFitGridSection) {
+        final local = render.globalToLocal(globalPosition);
+        if (render.isWithinDisclosure(localRow, local.dx)) {
+          _controller.grouping.toggle(line.groupKey!);
+          return;
+        }
+      }
+    }
 
     if (widget.keyboardNavigation) {
       _focusNode.requestFocus();
@@ -1185,6 +1337,11 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     FitGridRowsView<T> rows,
     int localRow,
   ) {
+    final line = rows.displayAt?.call(localRow);
+    if (line != null && line.expandable) {
+      _controller.grouping.toggle(line.groupKey!);
+      return;
+    }
     if (column.id == FitGrid.selectionColumnId) {
       _controller.selection.applyGesture(globalRow, toggleKey: true);
       return;
@@ -1300,45 +1457,30 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   (int, int) _editingCellIn(
     List<FitGridColumn<T>> columns,
     FitGridController<T> controller,
-    int pageOffset,
-    int pageLength,
+    FitGridRowsView<T> rows,
   ) {
     final editing = controller.editing;
-    return _localCell(
-      columns,
-      editing.rowIndex,
-      editing.columnId,
-      pageOffset,
-      pageLength,
-    );
+    return _localCell(columns, editing.rowIndex, editing.columnId, rows);
   }
 
   (int, int) _focusedCellIn(
     List<FitGridColumn<T>> columns,
-    int pageOffset,
-    int pageLength,
+    FitGridRowsView<T> rows,
   ) {
     if (!widget.keyboardNavigation) return (-1, -1);
     final focus = _controller.focus;
-    return _localCell(
-      columns,
-      focus.rowIndex,
-      focus.columnId,
-      pageOffset,
-      pageLength,
-    );
+    return _localCell(columns, focus.rowIndex, focus.columnId, rows);
   }
 
   (int, int) _localCell(
     List<FitGridColumn<T>> columns,
     int? globalRow,
     String? columnId,
-    int pageOffset,
-    int pageLength,
+    FitGridRowsView<T> rows,
   ) {
     if (globalRow == null || columnId == null) return (-1, -1);
-    final localRow = globalRow - pageOffset;
-    if (localRow < 0 || localRow >= pageLength) return (-1, -1);
+    final localRow = rows.localIndex(globalRow);
+    if (localRow < 0) return (-1, -1);
     final columnIndex = columns.indexWhere((column) => column.id == columnId);
     return columnIndex < 0 ? (-1, -1) : (localRow, columnIndex);
   }
@@ -1356,12 +1498,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     required FitGridThemeData theme,
   }) {
     final controller = _controller;
-    final (localRow, columnIndex) = _editingCellIn(
-      columns,
-      controller,
-      rows.offset,
-      rows.length,
-    );
+    final (localRow, columnIndex) = _editingCellIn(columns, controller, rows);
     if (localRow < 0) return null;
 
     final column = columns[columnIndex];

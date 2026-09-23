@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'row_model.dart';
+
 /// The rows the grid is showing right now, however they are stored.
 ///
 /// One seam for two very different suppliers: a list held in memory, and a
@@ -19,7 +21,11 @@ class FitGridRowsView<T> {
     required this.rowAt,
     required this.loaded,
     required this.identity,
-  });
+    this.displayAt,
+    int Function(int local)? globalIndexOf,
+    int Function(int global)? localIndexOf,
+  }) : _globalIndexOf = globalIndexOf,
+       _localIndexOf = localIndexOf;
 
   /// A view onto a plain list, where every row is present.
   factory FitGridRowsView.of(List<T> rows, {int offset = 0}) =>
@@ -66,6 +72,27 @@ class FitGridRowsView<T> {
 
   bool get isNotEmpty => length != 0;
 
-  /// The global index of a local row.
-  int globalIndex(int local) => offset + local;
+  /// The display line at a local index — a data row or a group header — or null
+  /// when the grid is not grouped and every line is simply a row.
+  final FitGridDisplayRow<T>? Function(int local)? displayAt;
+
+  final int Function(int local)? _globalIndexOf;
+  final int Function(int global)? _localIndexOf;
+
+  /// The index into the full row list of a local line, or -1 for a header.
+  ///
+  /// Arithmetic when the lines are rows in order, a lookup once grouping has
+  /// folded collapsed rows out from between them — which is why everything goes
+  /// through here rather than adding [offset] for itself.
+  int globalIndex(int local) => _globalIndexOf?.call(local) ?? offset + local;
+
+  /// The inverse: where a row from the full list currently sits on screen, or
+  /// -1 when it is inside something collapsed.
+  int localIndex(int global) {
+    final local = _localIndexOf?.call(global) ?? global - offset;
+    return local < 0 || local >= length ? -1 : local;
+  }
+
+  /// Whether the line at a local index is a group header rather than a row.
+  bool isHeader(int local) => displayAt?.call(local)?.isHeader ?? false;
 }

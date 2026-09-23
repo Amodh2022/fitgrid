@@ -26,6 +26,17 @@ typedef FitGridRowColorResolver = Color? Function(int rowIndex);
 /// a screen reader announces rather than merely a colour.
 typedef FitGridRowFlagResolver = bool Function(int rowIndex);
 
+/// How many columns a cell covers, starting at its own. 1 is an ordinary cell.
+///
+/// Merged cells are how a group header gets to be a sentence rather than a
+/// sentence clipped to the width of the first column, and they are the same
+/// mechanism a host uses to span a banner across a row.
+typedef FitGridCellSpanResolver = int Function(int rowIndex, int columnIndex);
+
+/// Extra indentation for a row's first cell, in pixels. Drives the nesting of
+/// grouped and tree rows without any of them being a separate kind of row.
+typedef FitGridRowIndentResolver = double Function(int rowIndex);
+
 /// Parent data for overlay children — the real widgets layered over the
 /// painted grid for cells that need interactivity or chrome.
 class FitGridCellParentData extends ContainerBoxParentData<RenderBox> {
@@ -91,6 +102,8 @@ class RenderFitGridSection extends RenderBox
     int focusedColumn = -1,
     int hoveredRow = -1,
     int rowIndexOffset = 0,
+    FitGridCellSpanResolver? cellSpan,
+    FitGridRowIndentResolver? rowIndent,
     void Function(int row, int column)? onCellActivate,
   }) : _columnLayout = columnLayout,
        _paintColumns = paintColumns,
@@ -112,6 +125,8 @@ class RenderFitGridSection extends RenderBox
        _focusedColumn = focusedColumn,
        _hoveredRow = hoveredRow,
        _rowIndexOffset = rowIndexOffset,
+       _cellSpan = cellSpan,
+       _rowIndent = rowIndent,
        _onCellActivate = onCellActivate;
 
   // ---------------------------------------------------------------- geometry
@@ -367,6 +382,32 @@ class RenderFitGridSection extends RenderBox
     if (_rowIndexOffset == value) return;
     _rowIndexOffset = value;
     markNeedsSemanticsUpdate();
+  }
+
+  FitGridCellSpanResolver? _cellSpan;
+
+  /// How many columns each cell covers. Null means every cell covers one.
+  set cellSpan(FitGridCellSpanResolver? value) {
+    if (_cellSpan == value) return;
+    final had = _cellSpan != null;
+    _cellSpan = value;
+    markNeedsPaint();
+    if (had != (value != null)) markNeedsSemanticsUpdate();
+  }
+
+  int _spanAt(int row, int column) {
+    final span = _cellSpan?.call(row, column) ?? 1;
+    if (span <= 1) return 1;
+    return math.min(span, _columnLayout.length - column);
+  }
+
+  FitGridRowIndentResolver? _rowIndent;
+
+  /// Extra leading inset for a row's first cell.
+  set rowIndent(FitGridRowIndentResolver? value) {
+    if (_rowIndent == value) return;
+    _rowIndent = value;
+    markNeedsPaint();
   }
 
   void Function(int row, int column)? _onCellActivate;
@@ -647,6 +688,8 @@ class RenderFitGridSection extends RenderBox
         size.width - layout.trailingFrozenWidth,
         offset,
       ),
+      bandFirst: layout.leadingFrozenCount,
+      bandLast: layout.trailingFrozenStart,
     );
 
     if (layout.leadingFrozenCount > 0) {
@@ -694,15 +737,24 @@ class RenderFitGridSection extends RenderBox
     Offset offset,
     int firstColumn,
     int lastColumn,
-    Rect band,
-  ) {
+    Rect band, {
+    int? bandFirst,
+    int? bandLast,
+  }) {
     if (band.width <= 0) return;
     canvas
       ..save()
       ..clipRect(band);
     _paintRowBackgrounds(canvas, offset, band);
     _paintRules(canvas, offset, band, firstColumn, lastColumn);
-    _paintText(canvas, offset, firstColumn, lastColumn);
+    _paintText(
+      canvas,
+      offset,
+      firstColumn,
+      lastColumn,
+      bandFirst ?? firstColumn,
+      bandLast ?? lastColumn,
+    );
     _paintFocusRing(canvas, offset, firstColumn, lastColumn);
     canvas.restore();
   }
@@ -835,6 +887,8 @@ class RenderFitGridSection extends RenderBox
     Offset offset,
     int firstColumn,
     int lastColumn,
+    int bandFirst,
+    int bandLast,
   ) {
     final padding = _theme.effectiveCellPadding;
 
@@ -842,27 +896,55 @@ class RenderFitGridSection extends RenderBox
       final top = offset.dy + _rowMetrics.offsetOf(row) - _verticalOffset;
       final height = _rowMetrics.heightOf(row);
 
-      for (var column = firstColumn; column < lastColumn; column++) {
-        if (_paintColumns[column].isWidgetColumn) continue;
-        if (row == _editingRow && column == _editingColumn) continue;
+      // A spanned cell can begin before this band and reach into it, so when
+      // any cell spans the scan starts at the first column of the band's range
+      // rather than at the first visible one. The band's clip is what keeps
+      // that honest; column counts are small, and spans are rare.
+      final from = _cellSpan == null ? firstColumn : bandFirst;
+      final to = _cellSpan == null ? lastColumn : bandLast;
 
-        final width = _columnLayout.widths[column];
-        final available = width - padding.horizontal;
+      for (var column = from; column < to; column++) {
+        final span = _spanAt(row, column);
+        if (_paintColumns[column].isWidgetColumn) {
+          column += span - 1;
+          continue;
+        }
+        if (row == _editingRow && column == _editingColumn) {
+          column += span - 1;
+          continue;
+        }
+
+        final width = span == 1
+            ? _columnLayout.widths[column]
+            : _columnLayout.offsets[column + span] -
+                  _columnLayout.offsets[column];
+        final indent = column == 0 ? (_rowIndent?.call(row) ?? 0.0) : 0.0;
+        final available = width - padding.horizontal - indent;
         if (available <= 0) continue;
         final availableHeight = height - padding.vertical;
         if (availableHeight <= 0) continue;
 
         final cell = _cellFor(row, column, available, availableHeight);
-        final left = offset.dx + _screenLeft(column);
+        final leadingEdge = offset.dx + _screenLeft(column);
+        // Under RTL a span grows leftwards from its own column, so its box
+        // starts where the last covered column does.
+        final left = _textDirection == TextDirection.ltr
+            ? leadingEdge
+            : leadingEdge + _columnLayout.widths[column] - width;
 
+        final rtl = _textDirection == TextDirection.rtl;
         final contentWidth = cell.painter.width + cell.iconAdvance;
         final free = available - contentWidth;
+        // The indent belongs on the leading edge. Under RTL that is the right,
+        // and the reduced `available` above has already put it there — adding
+        // it here as well would count it twice.
+        final leading =
+            padding.left + (_textDirection == TextDirection.ltr ? indent : 0.0);
         final inset = switch (_resolvedAlignment(column)) {
-          FitGridAlignment.start => padding.left,
-          FitGridAlignment.center => padding.left + math.max(0, free) / 2,
-          FitGridAlignment.end => padding.left + math.max(0, free),
+          FitGridAlignment.start => leading,
+          FitGridAlignment.center => leading + math.max(0, free) / 2,
+          FitGridAlignment.end => leading + math.max(0, free),
         };
-        final rtl = _textDirection == TextDirection.rtl;
         final contentLeft = left + inset;
         final textLeft = rtl ? contentLeft : contentLeft + cell.iconAdvance;
         final origin = Offset(
@@ -900,6 +982,7 @@ class RenderFitGridSection extends RenderBox
         cell.painter.paint(canvas, origin);
         if (needsClip) canvas.restore();
         _byCell[_cellKey(row, column)] = cell;
+        column += span - 1;
       }
     }
   }
@@ -1342,6 +1425,33 @@ class RenderFitGridSection extends RenderBox
 
   /// The full spec behind a cell, for tests that need more than its text.
   FitGridCellSpec cellSpecAt(int row, int column) => _cellSpec(row, column);
+
+  /// Whether a horizontal position falls inside the disclosure glyph of a
+  /// nested row's first cell.
+  ///
+  /// Lives here because the indent and the glyph are geometry the render layer
+  /// owns; the widget layer would have to reconstruct both to ask the same
+  /// question, and would get it wrong under RTL.
+  bool isWithinDisclosure(int row, double dx) {
+    if (_columnLayout.isEmpty) return false;
+    final indent = _rowIndent?.call(row) ?? 0.0;
+    final padding = _theme.effectiveCellPadding;
+    final start = _screenLeft(0) + indent + padding.left;
+    final extent = _theme.sortIconSize + _theme.cellIconGap;
+    return _textDirection == TextDirection.ltr
+        ? dx >= start && dx <= start + extent
+        : dx <=
+                  _screenLeft(0) +
+                      _columnLayout.widths[0] -
+                      indent -
+                      padding.left &&
+              dx >=
+                  _screenLeft(0) +
+                      _columnLayout.widths[0] -
+                      indent -
+                      padding.left -
+                      extent;
+  }
 
   /// On-screen left edge of a column. Exposed for
   /// `package:fitgrid/testing.dart`, where it is how a test proves a pinned

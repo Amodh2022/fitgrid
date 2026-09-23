@@ -31,6 +31,7 @@ class FitGridThemeData {
     required this.tooltipForeground,
     required this.searchHighlight,
     required this.frozenShadow,
+    required this.groupHeaderBackground,
     this.density = FitGridDensity.standard,
     this.dividerThickness = 1.0,
     this.borderRadius = const BorderRadius.all(Radius.circular(12)),
@@ -48,6 +49,10 @@ class FitGridThemeData {
     this.checkboxCheckedIcon = Icons.check_box_rounded,
     this.checkboxIndeterminateIcon = Icons.indeterminate_check_box_rounded,
     this.selectionColumnWidth = 44.0,
+    this.expandedIcon = Icons.keyboard_arrow_down_rounded,
+    this.collapsedIcon = Icons.keyboard_arrow_right_rounded,
+    this.nestingIndent = 20.0,
+    this.groupHeaderTextStyle,
     this.sortIconSize = 18.0,
     this.cellIconSize = 16.0,
     this.cellIconGap = 6.0,
@@ -115,6 +120,12 @@ class FitGridThemeData {
       // chosen to contrast with it, so it is a wash rather than a fill.
       searchHighlight: scheme.tertiary.withValues(alpha: isDark ? 0.38 : 0.28),
       frozenShadow: Colors.black.withValues(alpha: isDark ? 0.45 : 0.16),
+      groupHeaderBackground: isDark
+          ? Color.alphaBlend(
+              scheme.onSurface.withValues(alpha: 0.06),
+              scheme.surface,
+            )
+          : scheme.surfaceContainer,
       density: density,
     );
   }
@@ -155,6 +166,19 @@ class FitGridThemeData {
   /// Colour of the gradient cast by a pinned column band over the content
   /// scrolling beneath it.
   final Color frozenShadow;
+
+  /// Background of a group header row.
+  final Color groupHeaderBackground;
+
+  /// Text style for a group header. Null follows [cellTextStyle].
+  final TextStyle? groupHeaderTextStyle;
+
+  /// Disclosure glyphs for an open and a closed group or tree node.
+  final IconData expandedIcon;
+  final IconData collapsedIcon;
+
+  /// How far each level of grouping or nesting indents the first column.
+  final double nestingIndent;
 
   /// Vertical rhythm. Drives the defaults for padding and row height.
   final FitGridDensity density;
@@ -278,6 +302,11 @@ class FitGridThemeData {
     Color? tooltipForeground,
     Color? searchHighlight,
     Color? frozenShadow,
+    Color? groupHeaderBackground,
+    TextStyle? groupHeaderTextStyle,
+    IconData? expandedIcon,
+    IconData? collapsedIcon,
+    double? nestingIndent,
     FitGridDensity? density,
     double? dividerThickness,
     BorderRadius? borderRadius,
@@ -326,6 +355,12 @@ class FitGridThemeData {
       tooltipForeground: tooltipForeground ?? this.tooltipForeground,
       searchHighlight: searchHighlight ?? this.searchHighlight,
       frozenShadow: frozenShadow ?? this.frozenShadow,
+      groupHeaderBackground:
+          groupHeaderBackground ?? this.groupHeaderBackground,
+      groupHeaderTextStyle: groupHeaderTextStyle ?? this.groupHeaderTextStyle,
+      expandedIcon: expandedIcon ?? this.expandedIcon,
+      collapsedIcon: collapsedIcon ?? this.collapsedIcon,
+      nestingIndent: nestingIndent ?? this.nestingIndent,
       density: density ?? this.density,
       dividerThickness: dividerThickness ?? this.dividerThickness,
       borderRadius: borderRadius ?? this.borderRadius,
@@ -379,6 +414,11 @@ class FitGridThemeData {
         other.tooltipForeground == tooltipForeground &&
         other.searchHighlight == searchHighlight &&
         other.frozenShadow == frozenShadow &&
+        other.groupHeaderBackground == groupHeaderBackground &&
+        other.groupHeaderTextStyle == groupHeaderTextStyle &&
+        other.expandedIcon == expandedIcon &&
+        other.collapsedIcon == collapsedIcon &&
+        other.nestingIndent == nestingIndent &&
         other.cellIconSize == cellIconSize &&
         other.cellIconGap == cellIconGap &&
         other.focusRingWidth == focusRingWidth &&
@@ -427,6 +467,11 @@ class FitGridThemeData {
     tooltipForeground,
     searchHighlight,
     frozenShadow,
+    groupHeaderBackground,
+    groupHeaderTextStyle,
+    expandedIcon,
+    collapsedIcon,
+    nestingIndent,
     cellIconSize,
     cellIconGap,
     focusRingWidth,

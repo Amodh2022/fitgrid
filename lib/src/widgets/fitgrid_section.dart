@@ -29,6 +29,8 @@ class FitGridSection extends MultiChildRenderObjectWidget {
     this.focusedCell = (-1, -1),
     this.hoveredRow = -1,
     this.rowIndexOffset = 0,
+    this.cellSpan,
+    this.rowIndent,
     this.onCellActivate,
     super.children,
     super.key,
@@ -61,6 +63,12 @@ class FitGridSection extends MultiChildRenderObjectWidget {
   /// when paginated, and used only by semantics.
   final int rowIndexOffset;
 
+  /// How many columns each cell covers. Null means every cell covers one.
+  final FitGridCellSpanResolver? cellSpan;
+
+  /// Extra leading inset for a row's first cell, for nesting.
+  final FitGridRowIndentResolver? rowIndent;
+
   /// Invoked when a screen reader activates a cell.
   final void Function(int row, int column)? onCellActivate;
 
@@ -91,6 +99,8 @@ class FitGridSection extends MultiChildRenderObjectWidget {
       focusedColumn: focusedCell.$2,
       hoveredRow: hoveredRow,
       rowIndexOffset: rowIndexOffset,
+      cellSpan: cellSpan,
+      rowIndent: rowIndent,
       onCellActivate: onCellActivate,
     );
   }
@@ -119,6 +129,8 @@ class FitGridSection extends MultiChildRenderObjectWidget {
       ..focusedCell = focusedCell
       ..hoveredRow = hoveredRow
       ..rowIndexOffset = rowIndexOffset
+      ..cellSpan = cellSpan
+      ..rowIndent = rowIndent
       ..onCellActivate = onCellActivate;
   }
 }

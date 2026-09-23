@@ -6,6 +6,7 @@ import '../sizing/column_order.dart';
 import 'fitgrid_editing.dart';
 import 'fitgrid_filter.dart';
 import 'fitgrid_focus.dart';
+import 'fitgrid_grouping.dart';
 import 'fitgrid_pagination.dart';
 
 /// Rows, and the ordering applied to them.
@@ -408,6 +409,9 @@ class FitGridController<T> {
   /// The active search text and column filters.
   final FitGridFilterState<T> filter = FitGridFilterState<T>();
 
+  /// Grouping levels, tree structure, and which of them are open.
+  final FitGridGroupingState<T> grouping = FitGridGroupingState<T>();
+
   void Function(int rowIndex, String? columnId, double padding)? _reveal;
 
   /// Wires the controller to a mounted grid so [scrollTo] has something to
@@ -464,5 +468,6 @@ class FitGridController<T> {
     editing.dispose();
     focus.dispose();
     filter.dispose();
+    grouping.dispose();
   }
 }
