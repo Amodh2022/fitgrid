@@ -16,6 +16,7 @@ export 'src/controller/fitgrid_controller.dart'
         FitGridController,
         FitGridDataState,
         FitGridSelectionState;
+export 'src/controller/fitgrid_details.dart' show FitGridDetailState;
 export 'src/controller/fitgrid_editing.dart' show FitGridEditingState;
 export 'src/controller/fitgrid_filter.dart' show FitGridFilterState;
 export 'src/controller/fitgrid_focus.dart' show FitGridFocusState;
@@ -87,7 +88,8 @@ export 'src/model/row_model.dart'
         FitGridGroup,
         FitGridTree,
         flattenGroups,
-        flattenTree;
+        flattenTree,
+        insertDetails;
 export 'src/model/rows_view.dart' show FitGridRowsView;
 export 'src/model/sort_key.dart' show FitGridSortKey;
 export 'src/model/row_height.dart'

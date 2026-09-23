@@ -103,6 +103,10 @@ class FitGrid<T> extends StatefulWidget {
     this.multiSort = true,
     this.showColumnMenu = false,
     this.columnGroups = const <FitGridColumnGroup>[],
+    this.detailBuilder,
+    this.detailRowHeight = 240.0,
+    this.detailHeight,
+    this.rowKey,
     this.columnMenuBuilder,
     this.paginated = false,
     this.pageSize,
@@ -135,6 +139,10 @@ class FitGrid<T> extends StatefulWidget {
   /// The id of the built-in selection column. Reserved: do not give a column
   /// of your own this id.
   static const String selectionColumnId = '__fitgrid_selection';
+
+  /// The id of the built-in column that opens and closes detail panels.
+  /// Reserved, like [selectionColumnId].
+  static const String detailColumnId = '__fitgrid_detail';
 
   /// Rows to display. Ignored when [controller] or [dataSource] is supplied.
   final List<T> rows;
@@ -212,6 +220,34 @@ class FitGrid<T> extends StatefulWidget {
   /// Membership is by column id, so a band follows its columns through a
   /// reorder, and splits into one band per run if its columns are separated.
   final List<FitGridColumnGroup> columnGroups;
+
+  /// Builds the panel shown beneath a row when it is expanded — a nested grid,
+  /// a form, a chart, anything.
+  ///
+  /// Setting it adds a pinned chevron column at the leading edge; tapping a
+  /// row's chevron, or pressing Enter on it, opens and closes that row's
+  /// panel. Which rows are open lives on [FitGridController.details], keyed
+  /// by [rowKey].
+  ///
+  /// A panel is a real widget spanning the grid's full width. It is built
+  /// only while its row is on screen, like a widget cell, and it takes no part
+  /// in selection, editing, copy or export. Not available with a [dataSource].
+  final Widget Function(BuildContext context, T row, int rowIndex)?
+  detailBuilder;
+
+  /// Height of a detail panel, when [detailHeight] does not say otherwise.
+  final double detailRowHeight;
+
+  /// Height of one row's detail panel. Null uses [detailRowHeight] for all.
+  final double Function(T row, int rowIndex)? detailHeight;
+
+  /// A stable identity for a row, for anything that must follow a row rather
+  /// than an index — which detail panels are open, for one.
+  ///
+  /// Null uses the row object itself, which is right when rows are kept
+  /// between rebuilds or compare by value, and wrong when every rebuild makes
+  /// new row objects that do not: then return the row's id here.
+  final Object Function(T row)? rowKey;
 
   /// Gives every header a menu button with the column's commands: sort,
   /// filter, pin, size to fit, hide, and the column chooser.
@@ -392,6 +428,11 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   List<FitGridDisplayRow<T>>? _display;
   Object? _displayKey;
 
+  /// The display lines with detail panels inserted. Memoized separately from
+  /// [_display] so opening a panel does not re-flatten the grouping.
+  List<FitGridDisplayRow<T>>? _detailed;
+  Object? _detailedKey;
+
   /// Bumped whenever an attached data source notifies, so everything keyed on
   /// the row view re-derives when rows arrive.
   int _sourceRevision = 0;
@@ -448,7 +489,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         widget.pageSize != oldWidget.pageSize) {
       _syncPagination();
     }
-    if (widget.showSelectionColumn != oldWidget.showSelectionColumn) {
+    if (widget.showSelectionColumn != oldWidget.showSelectionColumn ||
+        (widget.detailBuilder == null) != (oldWidget.detailBuilder == null)) {
       _displayColumnsKey = null;
     }
   }
@@ -525,6 +567,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         controller.filter,
         controller.grouping,
         controller.range,
+        controller.details,
       ]),
       builder: (context, _) => LayoutBuilder(
         builder: (context, constraints) => _build(context, constraints),
@@ -590,6 +633,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       controller.selection.revision,
       controller.filter.query,
       _sourceRevision,
+      controller.details.revision,
     );
 
     final pageOffset = rowsView.offset;
@@ -628,6 +672,20 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       final row = rowsView.rowAt(rowIndex);
       if (row == null) return blank;
       final globalRow = rowsView.globalIndex(rowIndex);
+
+      if (column.id == FitGrid.detailColumnId) {
+        final open = _controller.details.isExpanded(_detailKey(row));
+        return FitGridCellSpec(
+          text: '',
+          style: theme.cellTextStyle,
+          alignment: FitGridAlignment.center,
+          overflow: FitGridOverflow.clip,
+          icon: open ? theme.expandedIcon : theme.collapsedIcon,
+          iconColor: theme.headerForeground,
+          iconSize: theme.sortIconSize,
+          semanticLabel: open ? 'Details shown' : 'Details hidden',
+        );
+      }
 
       if (column.id == FitGrid.selectionColumnId) {
         final on = selection.contains(globalRow);
@@ -669,6 +727,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     // meaningful when the user turns a page.
     Color? resolveRowColor(int rowIndex) {
       if (rowsView.isHeader(rowIndex)) return theme.groupHeaderBackground;
+      if (rowsView.isDetail(rowIndex)) return theme.effectiveDetailBackground;
       final global = rowsView.globalIndex(rowIndex);
       if (selection.contains(global)) return theme.selectedBackground;
       final row = rowsView.rowAt(rowIndex);
@@ -697,7 +756,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     ];
     final cellPadding = theme.effectiveCellPadding;
     Widget? buildCell(int localRow, int columnIndex) {
-      if (rowsView.isHeader(localRow)) return null;
+      if (rowsView.isControl(localRow)) return null;
       final row = rowsView.rowAt(localRow);
       if (row == null) return null;
       final global = rowsView.globalIndex(localRow);
@@ -714,6 +773,21 @@ class _FitGridState<T> extends State<FitGrid<T>> {
           // A Builder, so the cell's own element is the context: a widget that
           // reads Theme.of rebuilds itself, not the grid.
           child: Builder(builder: (context) => builder(context, row, global)),
+        ),
+      );
+    }
+
+    // Detail panels: one full-width widget per open row on screen.
+    Widget? buildDetail(int localRow) {
+      final line = rowsView.displayAt?.call(localRow);
+      if (line == null || !line.isDetail) return null;
+      final owner = line.detailOf as T;
+      final ownerIndex = line.ownerIndex!;
+      return ColoredBox(
+        color: theme.effectiveDetailBackground,
+        child: Builder(
+          builder: (context) =>
+              widget.detailBuilder!(context, owner, ownerIndex),
         ),
       );
     }
@@ -759,6 +833,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       ),
       cellBuilder: widgetColumns.isEmpty ? null : buildCell,
       widgetColumns: widgetColumns,
+      rowBuilder: _detailsEnabled ? buildDetail : null,
+      isFullRow: rowsView.displayAt == null ? null : rowsView.isDetail,
       children: <Widget>[?editorChild],
     );
 
@@ -902,21 +978,56 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   /// columns it declared, not one the grid added behind its back.
   List<FitGridColumn<T>> _resolveColumns(FitGridThemeData theme) {
     final base = _controller.columns.visible;
+    final showDetails = _detailsEnabled;
     final key = Object.hash(
       identityHashCode(base),
       widget.showSelectionColumn,
+      showDetails,
       theme.selectionColumnWidth,
     );
     final cached = _displayColumns;
     if (cached != null && _displayColumnsKey == key) return cached;
 
-    final resolved = widget.showSelectionColumn
-        ? <FitGridColumn<T>>[_selectionColumn(theme), ...base]
+    final resolved = widget.showSelectionColumn || showDetails
+        ? <FitGridColumn<T>>[
+            if (widget.showSelectionColumn) _selectionColumn(theme),
+            if (showDetails) _detailColumn(theme),
+            ...base,
+          ]
         : base;
     _displayColumns = resolved;
     _displayColumnsKey = key;
     return resolved;
   }
+
+  /// Whether rows can open a detail panel here.
+  bool get _detailsEnabled =>
+      widget.detailBuilder != null && widget.dataSource == null;
+
+  /// The key a row's detail panel is filed under.
+  Object _detailKey(T row) => widget.rowKey?.call(row) ?? row as Object;
+
+  static bool _isSyntheticId(String id) => id.startsWith('__fitgrid');
+
+  /// Whether a column is one the grid added — the selection checkbox, the
+  /// detail chevron — rather than one of the host's. Such columns are
+  /// controls, not data: they are never copied, pasted into or selected.
+  static bool _isSynthetic(FitGridColumn<Object?> column) =>
+      _isSyntheticId(column.id);
+
+  FitGridColumn<T> _detailColumn(FitGridThemeData theme) => FitGridColumn<T>(
+    id: FitGrid.detailColumnId,
+    label: '',
+    value: (_) => '',
+    width: FitGridColumnWidth.fixed(theme.selectionColumnWidth),
+    alignment: FitGridAlignment.center,
+    freeze: FitGridFreeze.start,
+    resizable: false,
+    reorderable: false,
+    sortable: false,
+    searchable: false,
+    hideable: false,
+  );
 
   FitGridColumn<T> _selectionColumn(FitGridThemeData theme) => FitGridColumn<T>(
     id: FitGrid.selectionColumnId,
@@ -957,7 +1068,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       );
     }
     final rows = _controller.data.view;
-    final display = _resolveDisplay(rows);
+    final display = _withDetails(rows, _resolveDisplay(rows));
     if (display == null) return _pageOf(rows, _controller.pagination);
     return _viewOfDisplay(rows, display, _controller.pagination);
   }
@@ -985,7 +1096,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     final sourceToLocal = <int, int>{};
     for (var i = 0; i < length; i++) {
       final line = display[start + i];
-      if (!line.isHeader) sourceToLocal[line.sourceIndex] = i;
+      if (line.isData) sourceToLocal[line.sourceIndex] = i;
     }
 
     return FitGridRowsView<T>(
@@ -1043,6 +1154,43 @@ class _FitGridState<T> extends State<FitGrid<T>> {
           );
     _display = lines;
     _displayKey = key;
+    return lines;
+  }
+
+  /// The display lines with a detail panel after every open row, or [display]
+  /// untouched when no panel is open.
+  ///
+  /// A flat grid with a panel open takes the display-line path for as long as
+  /// one is open, because that is what lets a line on screen be something
+  /// other than a row. Closing the last one puts it back on the plain path.
+  List<FitGridDisplayRow<T>>? _withDetails(
+    List<T> rows,
+    List<FitGridDisplayRow<T>>? display,
+  ) {
+    final details = _controller.details;
+    if (!_detailsEnabled || details.isEmpty) {
+      _detailed = null;
+      _detailedKey = null;
+      return display;
+    }
+    final key = Object.hash(
+      identityHashCode(display ?? rows),
+      rows.length,
+      details.revision,
+      widget.rowKey,
+    );
+    final cached = _detailed;
+    if (cached != null && _detailedKey == key) return cached;
+
+    final base =
+        display ??
+        flattenGroups<T>(rows: rows, groups: const [], isExpanded: (_) => true);
+    final lines = insertDetails<T>(
+      base,
+      (row) => details.isExpanded(_detailKey(row)),
+    );
+    _detailed = lines;
+    _detailedKey = key;
     return lines;
   }
 
@@ -1334,6 +1482,13 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       _controller.focus.moveTo(globalRow, column.id);
     }
 
+    // The chevron opens and closes the row's panel, and does nothing else: it
+    // is a control, like the checkbox, not a cell.
+    if (column.id == FitGrid.detailColumnId) {
+      _controller.details.toggle(_detailKey(row));
+      return;
+    }
+
     final keys = HardwareKeyboard.instance;
     final toggleKey =
         keys.isControlPressed ||
@@ -1344,10 +1499,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     // that: extending the row selection as well would select whole rows the
     // user only meant to take a few cells from.
     final extendsRange =
-        widget.cellSelection &&
-        keys.isShiftPressed &&
-        column.id != FitGrid.selectionColumnId;
-    if (widget.cellSelection && column.id != FitGrid.selectionColumnId) {
+        widget.cellSelection && keys.isShiftPressed && !_isSynthetic(column);
+    if (widget.cellSelection && !_isSynthetic(column)) {
       if (extendsRange) {
         _controller.range.extendTo(globalRow, column.id);
       } else {
@@ -1478,15 +1631,17 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     }
     if (row < 0 || row >= rows.length) return null;
     if (column < 0 || column >= columns.length) return null;
-    if (columns[column].id == FitGrid.selectionColumnId) {
-      if (!clamp || columns.length < 2) return null;
-      column = 1;
+    if (_isSynthetic(columns[column])) {
+      if (!clamp) return null;
+      final firstData = columns.indexWhere((c) => !_isSynthetic(c));
+      if (firstData < 0) return null;
+      column = firstData;
     }
-    if (rows.isHeader(row)) {
+    if (rows.isControl(row)) {
       if (!clamp) return null;
       // A group header has no cells to select; step onto the nearest row.
       var probe = row;
-      while (probe < rows.length && rows.isHeader(probe)) {
+      while (probe < rows.length && rows.isControl(probe)) {
         probe++;
       }
       if (probe >= rows.length) return null;
@@ -1540,7 +1695,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     if (a < 0 || b < 0) return const <int>[];
     return <int>[
       for (var i = math.min(a, b); i <= math.max(a, b); i++)
-        if (!rows.isHeader(i)) rows.globalIndex(i),
+        if (!rows.isControl(i)) rows.globalIndex(i),
     ];
   }
 
@@ -1554,8 +1709,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     ]);
     return <FitGridColumn<T>>[
       for (final column in columns)
-        if (ids.contains(column.id) && column.id != FitGrid.selectionColumnId)
-          column,
+        if (ids.contains(column.id) && !_isSynthetic(column)) column,
     ];
   }
 
@@ -1906,10 +2060,10 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     String toColumn, {
     required bool extend,
   }) {
-    if (toColumn == FitGrid.selectionColumnId) return;
+    if (_isSyntheticId(toColumn)) return;
     final range = _controller.range;
     if (!extend) return range.select(toRow, toColumn);
-    if (!range.isActive && fromColumn != FitGrid.selectionColumnId) {
+    if (!range.isActive && !_isSyntheticId(fromColumn)) {
       range.select(fromRow, fromColumn);
     }
     range.extendTo(toRow, toColumn);
@@ -1930,6 +2084,11 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     }
     if (column.id == FitGrid.selectionColumnId) {
       _controller.selection.applyGesture(globalRow, toggleKey: true);
+      return;
+    }
+    if (column.id == FitGrid.detailColumnId) {
+      final row = rows.rowAt(localRow);
+      if (row != null) _controller.details.toggle(_detailKey(row));
       return;
     }
     if (column.isEditable) {
@@ -1967,7 +2126,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     }
     final copyable = <FitGridColumn<T>>[
       for (final column in columns)
-        if (column.id != FitGrid.selectionColumnId) column,
+        if (!_isSynthetic(column)) column,
     ];
     if (copyable.isEmpty) return;
 
@@ -2051,7 +2210,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
 
     final data2 = <FitGridColumn<T>>[
       for (final column in columns)
-        if (column.id != FitGrid.selectionColumnId) column,
+        if (!_isSynthetic(column)) column,
     ];
     final List<FitGridColumn<T>> targetColumns;
     final List<int> targetRows;
@@ -2128,7 +2287,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     }
     final out = <int>[];
     for (var i = rows.localIndex(start); i >= 0 && i < rows.length; i++) {
-      if (rows.isHeader(i)) continue;
+      if (rows.isControl(i)) continue;
       out.add(rows.globalIndex(i));
       if (out.length == count) break;
     }
@@ -2547,6 +2706,26 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     return layout;
   }
 
+  /// The row heights with each detail line given its panel's height. Only
+  /// reached while a panel is open, so it is O(lines) exactly when the lines
+  /// are already being walked to insert the panels.
+  FitGridRowMetrics _withDetailHeights(
+    FitGridRowMetrics base,
+    FitGridRowsView<T> rows,
+  ) {
+    final heights = List<double>.generate(rows.length, base.heightOf);
+    var any = false;
+    for (var i = 0; i < rows.length; i++) {
+      final line = rows.displayAt!(i);
+      if (line == null || !line.isDetail) continue;
+      any = true;
+      heights[i] =
+          widget.detailHeight?.call(line.detailOf as T, line.ownerIndex!) ??
+          widget.detailRowHeight;
+    }
+    return any ? FitGridRowMetrics.measured(heights) : base;
+  }
+
   /// Header room every column needs beyond its label and sort icon.
   double _headerExtra(FitGridThemeData theme) =>
       widget.showColumnMenu ? theme.sortIconSize + 4 : 0.0;
@@ -2568,11 +2747,12 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       widget.rowHeight,
       textDirection,
       textScaler,
+      widget.detailRowHeight,
     );
     final cached = _rowMetrics;
     if (cached != null && _rowMetricsKey == key) return cached;
 
-    final metrics = _rowSizer.resolve(
+    var metrics = _rowSizer.resolve(
       policy: widget.rowHeight,
       columns: columns,
       rows: rows,
@@ -2581,6 +2761,11 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       textDirection: textDirection,
       textScaler: textScaler,
     );
+    if (_detailsEnabled &&
+        !_controller.details.isEmpty &&
+        rows.displayAt != null) {
+      metrics = _withDetailHeights(metrics, rows);
+    }
     _rowMetrics = metrics;
     _rowMetricsKey = key;
     return metrics;

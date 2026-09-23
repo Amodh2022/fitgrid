@@ -5,6 +5,7 @@ import '../export/fitgrid_export.dart';
 import '../model/fitgrid_column.dart';
 import '../model/sort_key.dart';
 import '../sizing/column_order.dart';
+import 'fitgrid_details.dart';
 import 'fitgrid_editing.dart';
 import 'fitgrid_filter.dart';
 import 'fitgrid_focus.dart';
@@ -549,6 +550,10 @@ class FitGridController<T> {
   /// The selected rectangle of cells, when `FitGrid.cellSelection` is on.
   final FitGridCellRangeState range = FitGridCellRangeState();
 
+  /// Which rows have their detail panel open, when `FitGrid.detailBuilder`
+  /// is set.
+  final FitGridDetailState details = FitGridDetailState();
+
   void Function(int rowIndex, String? columnId, double padding)? _reveal;
 
   /// Wires the controller to a mounted grid so [scrollTo] has something to
@@ -723,5 +728,6 @@ class FitGridController<T> {
     filter.dispose();
     grouping.dispose();
     range.dispose();
+    details.dispose();
   }
 }

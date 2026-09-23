@@ -43,8 +43,14 @@ class FitGridCellParentData extends ContainerBoxParentData<RenderBox> {
   /// Absolute row index, not an index into the visible window.
   int rowIndex = -1;
 
-  /// Index into the visible columns of the section's [FitGridColumnLayout].
+  /// Index into the visible columns of the section's [FitGridColumnLayout],
+  /// or [fullRow] for a child that spans the whole row.
   int columnIndex = -1;
+
+  /// The [columnIndex] of a child laid across the full width of the section —
+  /// a detail panel — rather than into one column. It ignores the bands: it
+  /// neither scrolls sideways nor hides beneath a pinned column.
+  static const int fullRow = -2;
 }
 
 /// Paints a rectangular block of grid cells as text, with real widgets layered
@@ -105,6 +111,7 @@ class RenderFitGridSection extends RenderBox
     int rowIndexOffset = 0,
     FitGridCellSpanResolver? cellSpan,
     FitGridRowIndentResolver? rowIndent,
+    FitGridRowFlagResolver? isFullRow,
     void Function(int row, int column)? onCellActivate,
   }) : _columnLayout = columnLayout,
        _paintColumns = paintColumns,
@@ -129,6 +136,7 @@ class RenderFitGridSection extends RenderBox
        _rowIndexOffset = rowIndexOffset,
        _cellSpan = cellSpan,
        _rowIndent = rowIndent,
+       _isFullRow = isFullRow,
        _onCellActivate = onCellActivate;
 
   // ---------------------------------------------------------------- geometry
@@ -453,6 +461,20 @@ class RenderFitGridSection extends RenderBox
     markNeedsPaint();
   }
 
+  FitGridRowFlagResolver? _isFullRow;
+
+  /// Rows given over entirely to a full-width child — detail panels. Their
+  /// cells are not painted and not announced: the child is the content, and
+  /// it carries its own semantics.
+  set isFullRow(FitGridRowFlagResolver? value) {
+    if (_isFullRow == value) return;
+    _isFullRow = value;
+    markNeedsPaint();
+    markNeedsSemanticsUpdate();
+  }
+
+  bool _fullRow(int row) => _isFullRow?.call(row) ?? false;
+
   void Function(int row, int column)? _onCellActivate;
   set onCellActivate(void Function(int row, int column)? value) {
     if (_onCellActivate == value) return;
@@ -624,7 +646,20 @@ class RenderFitGridSection extends RenderBox
       final columnIndex = data.columnIndex;
       final rowIndex = data.rowIndex;
 
-      if (columnIndex < 0 || columnIndex >= _columnLayout.length) {
+      if (columnIndex == FitGridCellParentData.fullRow) {
+        final inRange = rowIndex >= 0 && rowIndex < rowCount;
+        child.layout(
+          BoxConstraints.tightFor(
+            width: size.width,
+            height: inRange ? _rowMetrics.heightOf(rowIndex) : 0.0,
+          ),
+          parentUsesSize: false,
+        );
+        data.offset = Offset(
+          0,
+          (inRange ? _rowMetrics.offsetOf(rowIndex) : 0.0) - _verticalOffset,
+        );
+      } else if (columnIndex < 0 || columnIndex >= _columnLayout.length) {
         // Stale tag — lay out degenerately rather than throwing. A child that
         // cannot be placed must still be laid out, or the semantics and paint
         // phases will trip over an unlaid-out render object.
@@ -785,6 +820,7 @@ class RenderFitGridSection extends RenderBox
   /// trailing pinned. Null for a stale column index.
   int? _bandOf(int columnIndex) {
     final layout = _columnLayout;
+    if (columnIndex == FitGridCellParentData.fullRow) return 3;
     if (columnIndex < 0 || columnIndex >= layout.length) return null;
     if (columnIndex < layout.leadingFrozenCount) return 0;
     if (columnIndex >= layout.trailingFrozenStart) return 2;
@@ -795,6 +831,7 @@ class RenderFitGridSection extends RenderBox
   Rect _bandLocalRect(int band) {
     final layout = _columnLayout;
     return switch (band) {
+      3 => Offset.zero & size,
       0 => _bandRect(0, layout.leadingFrozenWidth, Offset.zero),
       2 => _bandRect(
         size.width - layout.trailingFrozenWidth,
@@ -811,7 +848,7 @@ class RenderFitGridSection extends RenderBox
 
   final List<LayerHandle<ClipRectLayer>> _bandClips =
       List<LayerHandle<ClipRectLayer>>.generate(
-        3,
+        4,
         (_) => LayerHandle<ClipRectLayer>(),
       );
 
@@ -820,9 +857,10 @@ class RenderFitGridSection extends RenderBox
   /// a pinned column disappears beneath it instead of drawing over it, and a
   /// row scrolled half off the top is cut at the edge.
   ///
-  /// At most three clips per frame, one per band, however many children.
+  /// At most four clips per frame, one per band and one for the full-width
+  /// children, however many children there are.
   void _paintChildren(PaintingContext context, Offset offset) {
-    for (var band = 0; band < 3; band++) {
+    for (var band = 0; band < 4; band++) {
       var any = false;
       var child = firstChild;
       while (child != null && !any) {
@@ -1058,6 +1096,7 @@ class RenderFitGridSection extends RenderBox
     final padding = _theme.effectiveCellPadding;
 
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
+      if (_fullRow(row)) continue;
       for (var column = firstColumn; column < lastColumn; column++) {
         final span = _spanAt(row, column);
         // A merged cell can reach past the band it starts in — a group header
@@ -1082,6 +1121,7 @@ class RenderFitGridSection extends RenderBox
     final padding = _theme.effectiveCellPadding;
 
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
+      if (_fullRow(row)) continue;
       for (var column = 0; column < _columnLayout.length; column++) {
         final span = _spanAt(row, column);
         if (span <= 1) continue;
@@ -1417,6 +1457,7 @@ class RenderFitGridSection extends RenderBox
     final layout = _columnLayout;
 
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
+      if (_fullRow(row)) continue;
       final cells = <SemanticsNode>[];
       final rowTop = _rowMetrics.offsetOf(row) - _verticalOffset;
       final rowHeight = _rowMetrics.heightOf(row);

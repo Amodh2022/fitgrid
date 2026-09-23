@@ -11,6 +11,9 @@ import '../theme/fitgrid_theme.dart';
 /// section: rows local to the page, columns into the visible columns.
 typedef FitGridSectionCellBuilder = Widget? Function(int row, int column);
 
+/// Builds the full-width widget for one row, or null for none.
+typedef FitGridSectionRowBuilder = Widget? Function(int row);
+
 /// Widget wrapper around [RenderFitGridSection].
 ///
 /// [children] are fixed overlay children — the editor — and each must be
@@ -40,8 +43,10 @@ class FitGridSection extends RenderObjectWidget {
     this.rowIndexOffset = 0,
     this.cellSpan,
     this.rowIndent,
+    this.isFullRow,
     this.onCellActivate,
     this.cellBuilder,
+    this.rowBuilder,
     this.widgetColumns = const <int>[],
     this.children = const <Widget>[],
     super.key,
@@ -55,6 +60,13 @@ class FitGridSection extends RenderObjectWidget {
 
   /// Indices of the columns [cellBuilder] is asked about.
   final List<int> widgetColumns;
+
+  /// Builds a full-width widget for a row — a detail panel. Asked about every
+  /// row in the window; return null for the rows that have none.
+  final FitGridSectionRowBuilder? rowBuilder;
+
+  /// Rows given over to a [rowBuilder] widget, whose cells are not painted.
+  final FitGridRowFlagResolver? isFullRow;
 
   @override
   RenderObjectElement createElement() => _FitGridSectionElement(this);
@@ -128,6 +140,7 @@ class FitGridSection extends RenderObjectWidget {
       rowIndexOffset: rowIndexOffset,
       cellSpan: cellSpan,
       rowIndent: rowIndent,
+      isFullRow: isFullRow,
       onCellActivate: onCellActivate,
     );
   }
@@ -159,6 +172,7 @@ class FitGridSection extends RenderObjectWidget {
       ..rowIndexOffset = rowIndexOffset
       ..cellSpan = cellSpan
       ..rowIndent = rowIndent
+      ..isFullRow = isFullRow
       ..onCellActivate = onCellActivate;
   }
 }
@@ -249,7 +263,9 @@ class _FitGridSectionElement extends RenderObjectElement {
   /// builders may have changed, even if the window has not.
   void _wireBuilder() {
     final render = renderObject;
-    if (_section.cellBuilder == null || _section.widgetColumns.isEmpty) {
+    final wantsCells =
+        _section.cellBuilder != null && _section.widgetColumns.isNotEmpty;
+    if (!wantsCells && _section.rowBuilder == null) {
       render.cellBuilder = null;
       // Nothing will ask again, so the cells go now rather than at a layout
       // that will not build any.
@@ -269,13 +285,27 @@ class _FitGridSectionElement extends RenderObjectElement {
   /// Called by the render object, inside layout, with the rows now on screen.
   void _buildCells(int first, int last) {
     owner!.buildScope(this, () {
-      final build = _section.cellBuilder!;
-      final columns = _section.widgetColumns;
+      final build = _section.cellBuilder;
+      final columns = build == null ? const <int>[] : _section.widgetColumns;
+      final buildRow = _section.rowBuilder;
       final next = <(int, int), Element>{};
       for (var row = first; row < last; row++) {
+        if (buildRow != null) {
+          const column = FitGridCellParentData.fullRow;
+          final key = (row, column);
+          final built = buildRow(row);
+          final element = updateChild(
+            _cells.remove(key),
+            built == null
+                ? null
+                : FitGridCell(rowIndex: row, columnIndex: column, child: built),
+            _cellSlot,
+          );
+          if (element != null) next[key] = element;
+        }
         for (final column in columns) {
           final key = (row, column);
-          final built = build(row, column);
+          final built = build!(row, column);
           final element = updateChild(
             _cells.remove(key),
             built == null

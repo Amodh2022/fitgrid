@@ -66,6 +66,8 @@ FitGridExportData buildFitGridExport<T>({
 
   if (display != null) {
     for (final line in display) {
+      // A detail panel is a widget, not data.
+      if (line.isDetail) continue;
       if (line.isHeader) {
         // Exporting a selection exports rows, not the structure they happened
         // to be sitting in.

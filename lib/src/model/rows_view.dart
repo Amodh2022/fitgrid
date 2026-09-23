@@ -95,4 +95,15 @@ class FitGridRowsView<T> {
 
   /// Whether the line at a local index is a group header rather than a row.
   bool isHeader(int local) => displayAt?.call(local)?.isHeader ?? false;
+
+  /// Whether the line at a local index is an expanded detail panel.
+  bool isDetail(int local) => displayAt?.call(local)?.isDetail ?? false;
+
+  /// Whether the line at a local index is something other than a data row —
+  /// a group header or a detail panel — and so has no cells to select, edit
+  /// or copy.
+  bool isControl(int local) {
+    final line = displayAt?.call(local);
+    return line != null && !line.isData;
+  }
 }
