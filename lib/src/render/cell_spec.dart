@@ -21,7 +21,22 @@ class FitGridCellSpec {
     this.iconSize,
     this.highlights = const <int>[],
     this.semanticLabel,
+    this.placeholder = false,
   });
+
+  /// A skeleton bar standing in for content that is on its way — a row a data
+  /// source is still fetching, or the rows below the end while more load.
+  ///
+  /// Painted as a rounded bar rather than left blank, because a blank row
+  /// reads as "nothing here" while a bar reads as "something coming".
+  static const FitGridCellSpec loading = FitGridCellSpec(
+    text: '',
+    style: TextStyle(),
+    alignment: FitGridAlignment.start,
+    overflow: FitGridOverflow.clip,
+    placeholder: true,
+    semanticLabel: 'Loading',
+  );
 
   /// A blank cell. Handed out for rows a [FitGridDataSource] has not delivered
   /// yet, where there is nothing to paint but the geometry still has to exist.
@@ -64,6 +79,9 @@ class FitGridCellSpec {
   /// from the painted text — a raw timestamp painted as "3m ago", say.
   final String? semanticLabel;
 
+  /// Whether this cell paints a skeleton bar instead of text.
+  final bool placeholder;
+
   bool get hasHighlights => highlights.isNotEmpty;
 
   @override
@@ -79,6 +97,7 @@ class FitGridCellSpec {
           other.iconColor == iconColor &&
           other.iconSize == iconSize &&
           other.semanticLabel == semanticLabel &&
+          other.placeholder == placeholder &&
           listEquals(other.highlights, highlights);
 
   @override
@@ -92,6 +111,7 @@ class FitGridCellSpec {
     iconColor,
     iconSize,
     semanticLabel,
+    placeholder,
     Object.hashAll(highlights),
   );
 

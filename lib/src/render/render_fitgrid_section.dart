@@ -1155,7 +1155,21 @@ class RenderFitGridSection extends RenderBox
     final availableHeight = height - padding.vertical;
     if (availableHeight <= 0) return;
 
-    final cell = _cellFor(row, column, available, availableHeight);
+    final spec = _cellSpec(row, column);
+    if (spec.placeholder) {
+      return _paintPlaceholder(
+        canvas,
+        offset,
+        row,
+        column,
+        top,
+        height,
+        available,
+        padding,
+      );
+    }
+
+    final cell = _cellFor(spec, available, availableHeight);
     final leadingEdge = offset.dx + _screenLeft(column);
     // Under RTL a span grows leftwards from its own column, so its box starts
     // where the last covered column does.
@@ -1215,6 +1229,48 @@ class RenderFitGridSection extends RenderBox
     }
     if (needsClip) canvas.restore();
     _byCell[_cellKey(row, column)] = cell;
+  }
+
+  /// A skeleton bar where content is on its way.
+  ///
+  /// Its length varies with the row and column, deterministically, so a block
+  /// of loading rows looks like text of uneven length rather than a ruled
+  /// grid — and does not flicker from one frame to the next.
+  void _paintPlaceholder(
+    Canvas canvas,
+    Offset offset,
+    int row,
+    int column,
+    double top,
+    double height,
+    double available,
+    EdgeInsets padding,
+  ) {
+    final fraction = 0.45 + ((row * 7 + column * 13) % 5) * 0.1;
+    final width = available * fraction;
+    final barHeight = math.min(
+      height - padding.vertical,
+      (_theme.cellTextStyle.fontSize ?? 14) * 0.8,
+    );
+    if (width <= 0 || barHeight <= 0) return;
+    final leadingEdge = offset.dx + _screenLeft(column) + padding.left;
+    final left = _textDirection == TextDirection.ltr
+        ? leadingEdge
+        : offset.dx +
+              _screenLeft(column) +
+              _columnLayout.widths[column] -
+              padding.right -
+              width;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(left, top + (height - barHeight) / 2, width, barHeight),
+        Radius.circular(barHeight / 2),
+      ),
+      Paint()
+        ..color = _theme.placeholderForeground.withValues(
+          alpha: _theme.placeholderForeground.a * 0.25,
+        ),
+    );
   }
 
   /// A wash behind the characters a search matched.
@@ -1291,8 +1347,11 @@ class RenderFitGridSection extends RenderBox
   /// `FitGridRowHeight.contentSized(max: ...)` — or a wrapping column under a
   /// fixed row height — lays its text out at full height and paints it straight
   /// over the rows above and below.
-  _CachedCell _cellFor(int row, int column, double maxWidth, double maxHeight) {
-    final spec = _cellSpec(row, column);
+  _CachedCell _cellFor(
+    FitGridCellSpec spec,
+    double maxWidth,
+    double maxHeight,
+  ) {
     final key = Object.hash(spec, maxWidth, maxHeight);
     final existing = _cells[key];
 

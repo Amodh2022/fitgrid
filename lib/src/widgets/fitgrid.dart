@@ -103,6 +103,10 @@ class FitGrid<T> extends StatefulWidget {
     this.multiSort = true,
     this.showColumnMenu = false,
     this.columnGroups = const <FitGridColumnGroup>[],
+    this.onLoadMore,
+    this.hasMoreRows = true,
+    this.loadMoreThreshold = 10,
+    this.loadingRowCount = 3,
     this.detailBuilder,
     this.detailRowHeight = 240.0,
     this.detailHeight,
@@ -134,6 +138,11 @@ class FitGrid<T> extends StatefulWidget {
          dataSource == null || !paginated,
          'A data source pages itself; combining it with `paginated` would put '
          'two pagers on the same rows.',
+       ),
+       assert(
+         onLoadMore == null || (!paginated && dataSource == null),
+         'onLoadMore grows the rows as the user scrolls; a pager or a data '
+         'source already decides which rows are loaded.',
        );
 
   /// The id of the built-in selection column. Reserved: do not give a column
@@ -220,6 +229,30 @@ class FitGrid<T> extends StatefulWidget {
   /// Membership is by column id, so a band follows its columns through a
   /// reorder, and splits into one band per run if its columns are separated.
   final List<FitGridColumnGroup> columnGroups;
+
+  /// Called when the user scrolls to within [loadMoreThreshold] rows of the
+  /// end, to fetch the next batch — infinite scrolling.
+  ///
+  /// Append the new rows to the grid (or the controller) before the future
+  /// completes. While it is outstanding, [loadingRowCount] skeleton rows are
+  /// shown after the last row, and no second call is made. If it throws, no
+  /// retry happens until the user scrolls again, so a failing endpoint is not
+  /// hammered in a loop.
+  ///
+  /// Not for a [dataSource], which fetches its own windows, nor with
+  /// [paginated].
+  final Future<void> Function()? onLoadMore;
+
+  /// Whether there is anything left for [onLoadMore] to fetch. Set it false
+  /// once the last batch has arrived.
+  final bool hasMoreRows;
+
+  /// How close to the end, in rows, the user must scroll before [onLoadMore]
+  /// is called.
+  final int loadMoreThreshold;
+
+  /// How many skeleton rows to show while [onLoadMore] is running.
+  final int loadingRowCount;
 
   /// Builds the panel shown beneath a row when it is expanded — a nested grid,
   /// a form, a chart, anything.
@@ -443,6 +476,16 @@ class _FitGridState<T> extends State<FitGrid<T>> {
 
   Set<int> _lastReportedSelection = const <int>{};
 
+  /// Whether an [FitGrid.onLoadMore] call is outstanding.
+  bool _loadingMore = false;
+
+  /// Set when the last [FitGrid.onLoadMore] failed; cleared by the next
+  /// scroll, which is the only thing allowed to try again.
+  bool _loadMoreFailed = false;
+
+  FitGridRowsView<T>? _skeleton;
+  Object? _skeletonKey;
+
   @override
   void initState() {
     super.initState();
@@ -453,6 +496,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     _controller.attachViewport(_reveal);
     widget.dataSource?.addListener(_onSourceChanged);
     _lastReportedSelection = _controller.selection.selected;
+    _verticalController.addListener(_onVerticalScroll);
   }
 
   @override
@@ -523,6 +567,51 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     setState(() => _sourceRevision++);
   }
 
+  bool _loadCheckScheduled = false;
+
+  void _onVerticalScroll() {
+    if (widget.onLoadMore == null) return;
+    _loadMoreFailed = false;
+    // After the frame, not now: the offset has moved but the section has not
+    // laid out at it yet, so its window still describes where the user was.
+    if (_loadCheckScheduled) return;
+    _loadCheckScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadCheckScheduled = false;
+      if (mounted) _maybeLoadMore();
+    });
+  }
+
+  /// Calls [FitGrid.onLoadMore] when the window has reached the end.
+  ///
+  /// Asked after every build as well as on scroll, so a first batch too short
+  /// to fill the viewport keeps loading until it does — otherwise there would
+  /// be nothing to scroll, and so nothing to ask for more.
+  void _maybeLoadMore() {
+    final load = widget.onLoadMore;
+    if (load == null || !widget.hasMoreRows || _loadingMore) return;
+    if (_loadMoreFailed) return;
+    final render = _sectionKey.currentContext?.findRenderObject();
+    final int reached;
+    final int total;
+    if (render is RenderFitGridSection) {
+      reached = render.firstVisibleRow + render.visibleRowCount;
+      total = render.rowCount;
+    } else {
+      // No section means no rows yet: the first batch is what is missing.
+      reached = 0;
+      total = 0;
+    }
+    if (reached < total - widget.loadMoreThreshold) return;
+
+    setState(() => _loadingMore = true);
+    Future<void>.sync(
+      load,
+    ).catchError((Object _) => _loadMoreFailed = true).whenComplete(() {
+      if (mounted) setState(() => _loadingMore = false);
+    });
+  }
+
   /// Hands the structured column filters to a data source, which filters for
   /// itself for the same reason it sorts for itself.
   void _forwardFilters() {
@@ -546,7 +635,9 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     _controller.attachViewport(null);
     _sizer.dispose();
     _rowSizer.dispose();
-    _verticalController.dispose();
+    _verticalController
+      ..removeListener(_onVerticalScroll)
+      ..dispose();
     _horizontalController.dispose();
     _ownedFocusNode?.dispose();
     _ownedController?.dispose();
@@ -634,6 +725,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       controller.filter.query,
       _sourceRevision,
       controller.details.revision,
+      _loadingMore,
     );
 
     final pageOffset = rowsView.offset;
@@ -670,7 +762,12 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       }
 
       final row = rowsView.rowAt(rowIndex);
-      if (row == null) return blank;
+      // A row that exists but has not arrived — a data source mid-fetch, or a
+      // skeleton row while more load — gets a placeholder bar. A detail panel
+      // is covered by its widget and needs nothing.
+      if (row == null) {
+        return line != null && line.isDetail ? blank : FitGridCellSpec.loading;
+      }
       final globalRow = rowsView.globalIndex(rowIndex);
 
       if (column.id == FitGrid.detailColumnId) {
@@ -957,6 +1054,11 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     );
 
     if (source != null) _scheduleWindowLoad(source);
+    if (widget.onLoadMore != null && !_loadingMore) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _maybeLoadMore();
+      });
+    }
     if (!widget.keyboardNavigation) return decorated;
 
     return FocusableActionDetector(
@@ -1069,8 +1171,39 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     }
     final rows = _controller.data.view;
     final display = _withDetails(rows, _resolveDisplay(rows));
-    if (display == null) return _pageOf(rows, _controller.pagination);
-    return _viewOfDisplay(rows, display, _controller.pagination);
+    final view = display == null
+        ? _pageOf(rows, _controller.pagination)
+        : _viewOfDisplay(rows, display, _controller.pagination);
+    return _loadingMore && widget.loadingRowCount > 0
+        ? _withSkeleton(view)
+        : view;
+  }
+
+  /// [base] with [FitGrid.loadingRowCount] skeleton rows after its end.
+  ///
+  /// The extra rows exist in the geometry and nowhere else: they have no row,
+  /// no index, and paint as placeholder bars.
+  FitGridRowsView<T> _withSkeleton(FitGridRowsView<T> base) {
+    final extra = widget.loadingRowCount;
+    final key = Object.hash(base.identity, base.length, extra);
+    final cached = _skeleton;
+    if (cached != null && _skeletonKey == key) return cached;
+    final length = base.length + extra;
+    final view = FitGridRowsView<T>(
+      length: length,
+      offset: base.offset,
+      rowAt: (i) => i < base.length ? base.rowAt(i) : null,
+      displayAt: base.displayAt == null
+          ? null
+          : (i) => i < base.length ? base.displayAt!(i) : null,
+      globalIndexOf: (i) => i < base.length ? base.globalIndex(i) : -1,
+      localIndexOf: base.localIndex,
+      loaded: base.loaded,
+      identity: _SkeletonIdentity(base.identity, extra),
+    );
+    _skeleton = view;
+    _skeletonKey = key;
+    return view;
   }
 
   /// A rows view over flattened display lines.
@@ -2814,6 +2947,22 @@ class _PageIdentity {
 
   @override
   int get hashCode => Object.hash(identityHashCode(source), offset, length);
+}
+
+/// Cache key for a rows view with skeleton rows on the end.
+@immutable
+class _SkeletonIdentity {
+  const _SkeletonIdentity(this.base, this.extra);
+
+  final Object base;
+  final int extra;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _SkeletonIdentity && other.base == base && other.extra == extra;
+
+  @override
+  int get hashCode => Object.hash(base, extra);
 }
 
 /// Cache key for a data source's window. The revision is what moves; the source
