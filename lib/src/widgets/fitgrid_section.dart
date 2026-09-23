@@ -45,6 +45,8 @@ class FitGridSection extends RenderObjectWidget {
     this.cellSpan,
     this.rowIndent,
     this.isFullRow,
+    this.stickyChain,
+    this.groupEnd,
     this.onCellActivate,
     this.cellBuilder,
     this.rowBuilder,
@@ -68,6 +70,11 @@ class FitGridSection extends RenderObjectWidget {
 
   /// Rows given over to a [rowBuilder] widget, whose cells are not painted.
   final FitGridRowFlagResolver? isFullRow;
+
+  /// Group headers to pin while their rows scroll. See
+  /// [RenderFitGridSection.stickyChain].
+  final FitGridStickyChainResolver? stickyChain;
+  final FitGridGroupEndResolver? groupEnd;
 
   @override
   RenderObjectElement createElement() => _FitGridSectionElement(this);
@@ -146,6 +153,8 @@ class FitGridSection extends RenderObjectWidget {
       cellSpan: cellSpan,
       rowIndent: rowIndent,
       isFullRow: isFullRow,
+      stickyChain: stickyChain,
+      groupEnd: groupEnd,
       onCellActivate: onCellActivate,
     );
   }
@@ -179,6 +188,8 @@ class FitGridSection extends RenderObjectWidget {
       ..cellSpan = cellSpan
       ..rowIndent = rowIndent
       ..isFullRow = isFullRow
+      ..stickyChain = stickyChain
+      ..groupEnd = groupEnd
       ..onCellActivate = onCellActivate;
   }
 }

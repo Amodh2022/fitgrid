@@ -37,6 +37,15 @@ typedef FitGridCellSpanResolver = int Function(int rowIndex, int columnIndex);
 /// grouped and tree rows without any of them being a separate kind of row.
 typedef FitGridRowIndentResolver = double Function(int rowIndex);
 
+/// The headers to keep pinned while [firstRow] is the first row on screen,
+/// outermost first — the group the row is in, the group around that, and so
+/// on. Rows are indices into the section.
+typedef FitGridStickyChainResolver = List<int> Function(int firstRow);
+
+/// The first row after a pinned header's group — where the next header at its
+/// level, or the end, begins. It is what pushes the pinned header up and off.
+typedef FitGridGroupEndResolver = int Function(int headerRow);
+
 /// Parent data for overlay children — the real widgets layered over the
 /// painted grid for cells that need interactivity or chrome.
 class FitGridCellParentData extends ContainerBoxParentData<RenderBox> {
@@ -113,6 +122,8 @@ class RenderFitGridSection extends RenderBox
     FitGridCellSpanResolver? cellSpan,
     FitGridRowIndentResolver? rowIndent,
     FitGridRowFlagResolver? isFullRow,
+    FitGridStickyChainResolver? stickyChain,
+    FitGridGroupEndResolver? groupEnd,
     void Function(int row, int column)? onCellActivate,
   }) : _columnLayout = columnLayout,
        _paintColumns = paintColumns,
@@ -139,6 +150,8 @@ class RenderFitGridSection extends RenderBox
        _cellSpan = cellSpan,
        _rowIndent = rowIndent,
        _isFullRow = isFullRow,
+       _stickyChain = stickyChain,
+       _groupEnd = groupEnd,
        _onCellActivate = onCellActivate;
 
   // ---------------------------------------------------------------- geometry
@@ -489,6 +502,90 @@ class RenderFitGridSection extends RenderBox
 
   bool _fullRow(int row) => _isFullRow?.call(row) ?? false;
 
+  FitGridStickyChainResolver? _stickyChain;
+  FitGridGroupEndResolver? _groupEnd;
+
+  /// Group headers pinned to the top while their rows scroll beneath them.
+  /// Null pins nothing.
+  set stickyChain(FitGridStickyChainResolver? value) {
+    if (_stickyChain == value) return;
+    _stickyChain = value;
+    markNeedsPaint();
+  }
+
+  set groupEnd(FitGridGroupEndResolver? value) {
+    if (_groupEnd == value) return;
+    _groupEnd = value;
+    markNeedsPaint();
+  }
+
+  /// Where each pinned header was last painted: (row, top, height), top in
+  /// this box's coordinates. Kept for hit testing, which has to find a tap on
+  /// a pinned header rather than on the row scrolled beneath it.
+  final List<(int, double, double)> _stickySlots = <(int, double, double)>[];
+
+  /// Computes where the pinned headers go: stacked from the top, each pushed
+  /// up by the end of its own group so the next header slides it away rather
+  /// than overlapping it.
+  void _layoutSticky() {
+    _stickySlots.clear();
+    final chain = _stickyChain;
+    final end = _groupEnd;
+    if (chain == null || end == null || rowCount == 0) return;
+    final first = _rowMetrics.clampedRowAt(_verticalOffset);
+    var y = 0.0;
+    for (final row in chain(first)) {
+      if (row < 0 || row >= rowCount) continue;
+      final height = _rowMetrics.heightOf(row);
+      final natural = _rowMetrics.offsetOf(row) - _verticalOffset;
+      // A header still in its own place needs no pinning — and every header
+      // below it in the chain is in its place too.
+      if (natural >= y) break;
+      final groupEnd = end(row).clamp(0, rowCount);
+      final limit = _rowMetrics.offsetOf(groupEnd) - _verticalOffset - height;
+      final top = math.min(y, limit);
+      _stickySlots.add((row, top, height));
+      y = top + height;
+    }
+  }
+
+  /// The pinned header row under a local vertical offset, or -1.
+  int stickyRowAtOffset(double dy) {
+    for (final (row, top, height) in _stickySlots.reversed) {
+      if (dy >= top && dy < top + height) return row;
+    }
+    return -1;
+  }
+
+  void _paintSticky(Canvas canvas, Offset offset) {
+    if (_stickySlots.isEmpty) return;
+    final padding = _theme.effectiveCellPadding;
+    final background = Paint();
+    final rule = Paint()
+      ..color = _theme.border
+      ..strokeWidth = _theme.dividerThickness;
+    for (final (row, top, height) in _stickySlots) {
+      final y = offset.dy + top;
+      background.color = _rowColor?.call(row) ?? _theme.rowBackground;
+      // Opaque, whatever the header colour: the rows are scrolling under it.
+      canvas.drawRect(
+        Rect.fromLTWH(offset.dx, y, size.width, height),
+        Paint()..color = _theme.rowBackground,
+      );
+      canvas.drawRect(
+        Rect.fromLTWH(offset.dx, y, size.width, height),
+        background,
+      );
+      final span = _spanAt(row, 0);
+      _paintCell(canvas, offset, row, 0, span, padding, topOverride: y);
+      canvas.drawLine(
+        Offset(offset.dx, y + height),
+        Offset(offset.dx + size.width, y + height),
+        rule,
+      );
+    }
+  }
+
   void Function(int row, int column)? _onCellActivate;
   set onCellActivate(void Function(int row, int column)? value) {
     if (_onCellActivate == value) return;
@@ -696,6 +793,7 @@ class RenderFitGridSection extends RenderBox
       }
       child = data.nextSibling;
     }
+    _layoutSticky();
   }
 
   // --------------------------------------------------------- band geometry
@@ -825,6 +923,7 @@ class RenderFitGridSection extends RenderBox
     }
 
     _paintSpans(canvas, offset);
+    _paintSticky(canvas, offset);
     _paintDropLine(canvas, offset);
     canvas.restore();
     _pruneCache();
@@ -1163,12 +1262,14 @@ class RenderFitGridSection extends RenderBox
     int row,
     int column,
     int span,
-    EdgeInsets padding,
-  ) {
+    EdgeInsets padding, {
+    double? topOverride,
+  }) {
     if (_paintColumns[column].isWidgetColumn) return;
     if (row == _editingRow && column == _editingColumn) return;
 
-    final top = offset.dy + _rowMetrics.offsetOf(row) - _verticalOffset;
+    final top =
+        topOverride ?? offset.dy + _rowMetrics.offsetOf(row) - _verticalOffset;
     final height = _rowMetrics.heightOf(row);
 
     final width = span == 1

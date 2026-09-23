@@ -103,6 +103,7 @@ class FitGrid<T> extends StatefulWidget {
     this.multiSort = true,
     this.showColumnMenu = false,
     this.columnGroups = const <FitGridColumnGroup>[],
+    this.stickyGroupHeaders = true,
     this.reorderableRows = false,
     this.onRowReorder,
     this.onLoadMore,
@@ -235,6 +236,14 @@ class FitGrid<T> extends StatefulWidget {
   /// Membership is by column id, so a band follows its columns through a
   /// reorder, and splits into one band per run if its columns are separated.
   final List<FitGridColumnGroup> columnGroups;
+
+  /// Whether a group's header stays pinned to the top while its rows scroll
+  /// beneath it, with the headers of the groups around it stacked above, and
+  /// the next group's header pushing it away.
+  ///
+  /// Tapping a pinned header collapses its group, as tapping it in place
+  /// does. Painted, like the rows: pinning costs a few rectangles a frame.
+  final bool stickyGroupHeaders;
 
   /// Adds a pinned drag-handle column: drag a row by its handle to move it,
   /// or press Alt+Up / Alt+Down on the focused row.
@@ -483,6 +492,18 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   /// flattening is O(rows) and a build happens on every scroll frame.
   List<FitGridDisplayRow<T>>? _display;
   Object? _displayKey;
+
+  /// The display lines currently paged into view, and where the page starts
+  /// in them — what the pinned headers are looked up in.
+  List<FitGridDisplayRow<T>>? _pagedDisplay;
+  int _pagedStart = 0;
+
+  /// For each display line, the header of the group enclosing it (or -1), and
+  /// for each header, the first line after its group. Computed once per
+  /// flatten, so finding the pinned headers each frame is a few lookups rather
+  /// than a walk back through the group.
+  (Int32List, Int32List)? _groupIndex;
+  Object? _groupIndexOf;
 
   /// The display lines with detail panels inserted. Memoized separately from
   /// [_display] so opening a panel does not re-flatten the grouping.
@@ -736,6 +757,10 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     ];
 
     final canReorder = _canReorderRows;
+    final pinsHeaders =
+        widget.stickyGroupHeaders &&
+        controller.grouping.groups.isNotEmpty &&
+        rowsView.displayAt != null;
 
     // Identity of the row list changes whenever the data or the sort changes,
     // which is exactly when painted text could be stale. The selection revision
@@ -980,6 +1005,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       widgetColumns: widgetColumns,
       rowBuilder: _detailsEnabled ? buildDetail : null,
       isFullRow: rowsView.displayAt == null ? null : rowsView.isDetail,
+      stickyChain: pinsHeaders ? _stickyChain : null,
+      groupEnd: pinsHeaders ? _groupEndOf : null,
       children: <Widget>[?editorChild],
     );
 
@@ -1301,6 +1328,9 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         ? math.min(pagination.pageSize, display.length - start)
         : display.length;
 
+    _pagedDisplay = display;
+    _pagedStart = start;
+
     final sourceToLocal = <int, int>{};
     for (var i = 0; i < length; i++) {
       final line = display[start + i];
@@ -1321,6 +1351,60 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       loaded: rows,
       identity: _PageIdentity(display, start, length),
     );
+  }
+
+  (Int32List, Int32List) _indexGroups(List<FitGridDisplayRow<T>> display) {
+    final cached = _groupIndex;
+    if (cached != null && identical(_groupIndexOf, display)) return cached;
+    final enclosing = Int32List(display.length)
+      ..fillRange(0, display.length, -1);
+    final end = Int32List(display.length)..fillRange(0, display.length, -1);
+    final open = <int>[];
+    for (var i = 0; i < display.length; i++) {
+      final line = display[i];
+      // A group runs until the next line at its own depth or shallower: every
+      // open header that deep or deeper ends here. Rows sit deeper than every
+      // header above them, so only a header ever closes a group.
+      while (open.isNotEmpty && display[open.last].depth >= line.depth) {
+        end[open.removeLast()] = i;
+      }
+      enclosing[i] = open.isEmpty ? -1 : open.last;
+      if (line.isHeader) open.add(i);
+    }
+    for (final header in open) {
+      end[header] = display.length;
+    }
+    final index = (enclosing, end);
+    _groupIndex = index;
+    _groupIndexOf = display;
+    return index;
+  }
+
+  /// The headers to pin while local line [first] is at the top, outermost
+  /// first. Headers on an earlier page are left out: they are not in this
+  /// section to paint.
+  List<int> _stickyChain(int first) {
+    final display = _pagedDisplay;
+    if (display == null) return const <int>[];
+    final (enclosing, _) = _indexGroups(display);
+    final at = first + _pagedStart;
+    if (at < 0 || at >= display.length) return const <int>[];
+    var header = display[at].isHeader ? at : enclosing[at];
+    final chain = <int>[];
+    while (header >= 0) {
+      if (header >= _pagedStart) chain.add(header - _pagedStart);
+      header = enclosing[header];
+    }
+    return chain.reversed.toList();
+  }
+
+  int _groupEndOf(int header) {
+    final display = _pagedDisplay;
+    if (display == null) return header + 1;
+    final (_, end) = _indexGroups(display);
+    final at = header + _pagedStart;
+    if (at < 0 || at >= display.length) return header + 1;
+    return end[at] - _pagedStart;
   }
 
   /// The display lines for the current rows, flattened through the grouping or
@@ -2091,7 +2175,10 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     final render = _sectionKey.currentContext?.findRenderObject();
     if (render is! RenderFitGridSection) return null;
     final local = render.globalToLocal(globalPosition);
-    final row = render.rowAtOffset(local.dy);
+    // A pinned header is on top of whatever row has scrolled beneath it, so
+    // it takes the hit.
+    final pinned = render.stickyRowAtOffset(local.dy);
+    final row = pinned >= 0 ? pinned : render.rowAtOffset(local.dy);
     final column = render.columnAtOffset(local.dx);
     if (row < 0 || row >= rows.length) return null;
     if (column < 0 || column >= columns.length) return null;
