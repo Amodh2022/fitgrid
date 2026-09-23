@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
+import '../model/column_group.dart';
 import '../model/enums.dart';
 import '../model/fitgrid_column.dart';
 import '../model/sort_key.dart';
@@ -37,6 +38,7 @@ class FitGridHeader<T> extends StatelessWidget {
     this.onReorder,
     this.onColumnMenu,
     this.activeFilters = const <String>{},
+    this.columnGroups = const <FitGridColumnGroup>[],
     super.key,
   });
 
@@ -89,12 +91,41 @@ class FitGridHeader<T> extends StatelessWidget {
   /// Ids of the columns carrying a filter, whose headers show a filter glyph.
   final Set<String> activeFilters;
 
+  /// Bands spanning several columns, drawn as a row above their headers.
+  final List<FitGridColumnGroup> columnGroups;
+
+  /// Height of the band row. Nothing when there are no groups, so a grid
+  /// without them keeps the header height it always had.
+  static double groupRowHeight(
+    FitGridThemeData theme,
+    List<FitGridColumnGroup> groups,
+  ) => groups.isEmpty
+      ? 0.0
+      : (theme.effectiveHeaderHeight * 0.75).roundToDouble();
+
+  /// Total height of the header, band row included.
+  static double heightFor(
+    FitGridThemeData theme,
+    List<FitGridColumnGroup> groups,
+  ) => theme.effectiveHeaderHeight + groupRowHeight(theme, groups);
+
+  /// The group each column belongs to, by id.
+  Map<String, FitGridColumnGroup> get _groupOf {
+    final out = <String, FitGridColumnGroup>{};
+    for (final group in columnGroups) {
+      for (final id in group.columnIds) {
+        out.putIfAbsent(id, () => group);
+      }
+    }
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
     final textDirection = Directionality.of(context);
 
     return SizedBox(
-      height: theme.effectiveHeaderHeight,
+      height: heightFor(theme, columnGroups),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final viewport = constraints.maxWidth;
@@ -227,15 +258,49 @@ class _Band<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     if (lastColumn <= firstColumn) return const SizedBox.shrink();
     final layout = header.layout;
+    final groupOf = header._groupOf;
+    final bandHeight = FitGridHeader.groupRowHeight(
+      header.theme,
+      header.columnGroups,
+    );
+    FitGridColumnGroup? groupAt(int i) => groupOf[header.columns[i].id];
+
+    // Contiguous runs of one group, within this band only: a group split by a
+    // pin or a drag gets a band per run, each over its own columns.
+    final runs = <(int, int, FitGridColumnGroup)>[];
+    for (var i = firstColumn; i < lastColumn;) {
+      final group = groupAt(i);
+      var end = i + 1;
+      while (end < lastColumn && groupAt(end) == group && group != null) {
+        end++;
+      }
+      if (group != null) runs.add((i, end, group));
+      i = end;
+    }
 
     return Stack(
       clipBehavior: clipped ? Clip.hardEdge : Clip.none,
       children: [
+        for (final (start, end, group) in runs)
+          Positioned.directional(
+            textDirection: textDirection,
+            start: layout.offsets[start] - origin,
+            top: 0,
+            height: bandHeight,
+            width: layout.offsets[end] - layout.offsets[start],
+            child: _GroupCell(
+              group: group,
+              theme: header.theme,
+              isLast: end == layout.length,
+            ),
+          ),
         for (var i = firstColumn; i < lastColumn; i++)
           Positioned.directional(
             textDirection: textDirection,
             start: layout.offsets[i] - origin,
-            top: 0,
+            // An ungrouped column's header takes both rows, so it reads as
+            // one cell rather than a label under an empty band.
+            top: groupAt(i) == null ? 0 : bandHeight,
             bottom: 0,
             width: layout.widths[i],
             child: _HeaderCell<T>(
@@ -272,7 +337,7 @@ class _Band<T> extends StatelessWidget {
               // Offsets are measured from the leading edge, which is the right
               // one in RTL — so this is the same sum in both directions.
               start: layout.offsets[i + 1] - origin - header.targetWidth(i) / 2,
-              top: 0,
+              top: groupAt(i) == null ? 0 : bandHeight,
               bottom: 0,
               width: header.targetWidth(i),
               child: _ResizeHandle(
@@ -287,6 +352,56 @@ class _Band<T> extends StatelessWidget {
               ),
             ),
       ],
+    );
+  }
+}
+
+/// One band of the group row, spanning its columns.
+class _GroupCell extends StatelessWidget {
+  const _GroupCell({
+    required this.group,
+    required this.theme,
+    required this.isLast,
+  });
+
+  final FitGridColumnGroup group;
+  final FitGridThemeData theme;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final divider = BorderSide(
+      color: theme.columnDivider,
+      width: theme.dividerThickness,
+    );
+    Widget cell = DecoratedBox(
+      decoration: BoxDecoration(
+        border: BorderDirectional(
+          bottom: divider,
+          end: isLast ? BorderSide.none : divider,
+        ),
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: theme.effectiveHeaderPadding.left,
+        ),
+        child: Center(
+          child: Text(
+            group.label,
+            style: theme.headerTextStyle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+    );
+    if (group.tooltip != null) {
+      cell = Tooltip(message: group.tooltip!, child: cell);
+    }
+    return Semantics(
+      container: true,
+      header: true,
+      child: ClipRect(child: cell),
     );
   }
 }

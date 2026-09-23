@@ -30,6 +30,7 @@ export 'src/model/column_filter.dart'
         FitGridFilterKind,
         FitGridFilterOperator,
         FitGridFilterSpec;
+export 'src/model/column_group.dart' show FitGridColumnGroup;
 export 'src/model/column_width.dart'
     show
         FitGridAutoWidth,

@@ -10,6 +10,7 @@ import '../controller/fitgrid_controller.dart';
 import '../controller/fitgrid_pagination.dart';
 import '../controller/fitgrid_range.dart';
 import '../export/fitgrid_export.dart';
+import '../model/column_group.dart';
 import '../model/column_width.dart';
 import '../model/data_source.dart';
 import '../model/enums.dart';
@@ -101,6 +102,7 @@ class FitGrid<T> extends StatefulWidget {
     this.reorderableColumns = false,
     this.multiSort = true,
     this.showColumnMenu = false,
+    this.columnGroups = const <FitGridColumnGroup>[],
     this.columnMenuBuilder,
     this.paginated = false,
     this.pageSize,
@@ -203,6 +205,13 @@ class FitGrid<T> extends StatefulWidget {
   /// The controller can always sort by several columns — see
   /// [FitGridController.setSort] — this only governs the gesture.
   final bool multiSort;
+
+  /// Bands spanning several columns, drawn as a second header row above
+  /// their columns' own headers — "Q1" over January to March.
+  ///
+  /// Membership is by column id, so a band follows its columns through a
+  /// reorder, and splits into one band per run if its columns are separated.
+  final List<FitGridColumnGroup> columnGroups;
 
   /// Gives every header a menu button with the column's commands: sort,
   /// filter, pin, size to fit, hide, and the column chooser.
@@ -813,6 +822,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
                   ? (id, anchor) => _openColumnMenu(anchor, id)
                   : null,
               activeFilters: controller.filter.filteredColumnIds,
+              columnGroups: widget.columnGroups,
             ),
           ),
         Expanded(child: hoverable),
@@ -850,7 +860,9 @@ class _FitGridState<T> extends State<FitGrid<T>> {
               Positioned(
                 left: 0,
                 right: 0,
-                top: widget.showHeader ? theme.effectiveHeaderHeight : 0,
+                top: widget.showHeader
+                    ? FitGridHeader.heightFor(theme, widget.columnGroups)
+                    : 0,
                 child: LinearProgressIndicator(
                   minHeight: 2,
                   color: theme.focusOutline,
