@@ -100,6 +100,14 @@ export 'src/model/row_model.dart'
         flattenTree,
         insertDetails;
 export 'src/model/rows_view.dart' show FitGridRowsView;
+export 'src/model/pivot.dart'
+    show
+        FitGridAggregation,
+        FitGridPivotDimension,
+        FitGridPivotResult,
+        FitGridPivotRow,
+        FitGridPivotValue,
+        fitGridPivot;
 export 'src/model/sort_key.dart' show FitGridSortKey;
 export 'src/model/row_height.dart'
     show FitGridContentRowHeight, FitGridFixedRowHeight, FitGridRowHeight;
