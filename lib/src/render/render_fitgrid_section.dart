@@ -118,6 +118,8 @@ class RenderFitGridSection extends RenderBox
     int hoveredRow = -1,
     (int, int, int, int) selectedRange = noRange,
     int dropLine = -1,
+    (int, int) fillHandleCell = (-1, -1),
+    (int, int, int, int) fillPreview = noRange,
     int rowIndexOffset = 0,
     FitGridCellSpanResolver? cellSpan,
     FitGridRowIndentResolver? rowIndent,
@@ -146,6 +148,8 @@ class RenderFitGridSection extends RenderBox
        _hoveredRow = hoveredRow,
        _selectedRange = selectedRange,
        _dropLine = dropLine,
+       _fillHandleCell = fillHandleCell,
+       _fillPreview = fillPreview,
        _rowIndexOffset = rowIndexOffset,
        _cellSpan = cellSpan,
        _rowIndent = rowIndent,
@@ -444,6 +448,56 @@ class RenderFitGridSection extends RenderBox
     _dropLine = value;
     markNeedsPaint();
   }
+
+  (int, int) _fillHandleCell;
+
+  /// The cell whose far corner carries the fill handle — the corner of the
+  /// selected range — or (-1, -1) for none.
+  (int, int) get fillHandleCell => _fillHandleCell;
+  set fillHandleCell((int, int) value) {
+    if (_fillHandleCell == value) return;
+    _fillHandleCell = value;
+    markNeedsPaint();
+  }
+
+  (int, int, int, int) _fillPreview;
+
+  /// The block a fill drag would write, outlined while the drag is under way.
+  set fillPreview((int, int, int, int) value) {
+    if (_fillPreview == value) return;
+    _fillPreview = value;
+    markNeedsPaint();
+  }
+
+  /// The fill handle's box in this box's own coordinates, or null.
+  Rect? get fillHandleRect {
+    final (row, column) = _fillHandleCell;
+    if (row < 0 || row >= rowCount) return null;
+    if (column < 0 || column >= _columnLayout.length) return null;
+    final side = _theme.fillHandleSize;
+    final left = _screenLeft(column);
+    final x = _textDirection == TextDirection.ltr
+        ? left + _columnLayout.widths[column]
+        : left;
+    final y = _rowMetrics.offsetOf(row + 1) - _verticalOffset;
+    // Kept inside the section: on the last column, or the last row at the
+    // bottom of the viewport, a handle centred on the corner would hang half
+    // outside — half hidden, and half beyond where a press can reach it.
+    final half = side / 2;
+    return Rect.fromCenter(
+      center: Offset(
+        x.clamp(half, math.max(half, size.width - half)),
+        y.clamp(half, math.max(half, size.height - half)),
+      ),
+      width: side,
+      height: side,
+    );
+  }
+
+  /// Whether a local position is on the fill handle, with a margin: a
+  /// seven-pixel square is a fine thing to see and a poor thing to aim at.
+  bool hitsFillHandle(Offset position, {double slop = 6}) =>
+      fillHandleRect?.inflate(slop).contains(position) ?? false;
 
   bool _inRange(int row, int column) {
     final (r0, r1, c0, c1) = _selectedRange;
@@ -925,9 +979,43 @@ class RenderFitGridSection extends RenderBox
     _paintSpans(canvas, offset);
     _paintSticky(canvas, offset);
     _paintDropLine(canvas, offset);
+    _paintFill(canvas, offset);
     canvas.restore();
     _pruneCache();
     _paintChildren(context, offset);
+  }
+
+  void _paintFill(Canvas canvas, Offset offset) {
+    final (r0, r1, c0, c1) = _fillPreview;
+    if (r0 >= 0 && c0 >= 0 && r1 < rowCount && c1 < _columnLayout.length) {
+      final a = _screenLeft(c0);
+      final b = _screenLeft(c1);
+      final rect = Rect.fromLTRB(
+        offset.dx + math.min(a, b),
+        offset.dy + _rowMetrics.offsetOf(r0) - _verticalOffset,
+        offset.dx +
+            math.max(
+              a + _columnLayout.widths[c0],
+              b + _columnLayout.widths[c1],
+            ),
+        offset.dy + _rowMetrics.offsetOf(r1 + 1) - _verticalOffset,
+      );
+      canvas.drawRect(
+        rect.deflate(0.5),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..color = _theme.focusOutline.withValues(alpha: 0.8),
+      );
+    }
+    final handle = fillHandleRect;
+    if (handle == null) return;
+    final box = handle.shift(offset);
+    // A ring in the row colour around it, so it reads against the outline
+    // it sits on and against a selected row alike.
+    canvas
+      ..drawRect(box.inflate(1), Paint()..color = _theme.rowBackground)
+      ..drawRect(box, Paint()..color = _theme.focusOutline);
   }
 
   void _paintDropLine(Canvas canvas, Offset offset) {

@@ -41,6 +41,8 @@ class FitGridSection extends RenderObjectWidget {
     this.hoveredRow = -1,
     this.selectedRange = RenderFitGridSection.noRange,
     this.dropLine = -1,
+    this.fillHandleCell = (-1, -1),
+    this.fillPreview = RenderFitGridSection.noRange,
     this.rowIndexOffset = 0,
     this.cellSpan,
     this.rowIndent,
@@ -108,6 +110,12 @@ class FitGridSection extends RenderObjectWidget {
   /// Where a dragged row would be dropped, or -1.
   final int dropLine;
 
+  /// The cell carrying the fill handle, or (-1, -1).
+  final (int, int) fillHandleCell;
+
+  /// The block a fill drag would write, or [RenderFitGridSection.noRange].
+  final (int, int, int, int) fillPreview;
+
   /// Added to a local row index to name it in the full dataset. Non-zero only
   /// when paginated, and used only by semantics.
   final int rowIndexOffset;
@@ -149,6 +157,8 @@ class FitGridSection extends RenderObjectWidget {
       hoveredRow: hoveredRow,
       selectedRange: selectedRange,
       dropLine: dropLine,
+      fillHandleCell: fillHandleCell,
+      fillPreview: fillPreview,
       rowIndexOffset: rowIndexOffset,
       cellSpan: cellSpan,
       rowIndent: rowIndent,
@@ -184,6 +194,8 @@ class FitGridSection extends RenderObjectWidget {
       ..hoveredRow = hoveredRow
       ..selectedRange = selectedRange
       ..dropLine = dropLine
+      ..fillHandleCell = fillHandleCell
+      ..fillPreview = fillPreview
       ..rowIndexOffset = rowIndexOffset
       ..cellSpan = cellSpan
       ..rowIndent = rowIndent

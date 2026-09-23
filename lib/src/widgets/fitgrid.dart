@@ -16,6 +16,7 @@ import '../model/column_width.dart';
 import '../model/data_source.dart';
 import '../model/enums.dart';
 import '../model/fitgrid_column.dart';
+import '../model/fill_series.dart';
 import '../model/fitgrid_editor.dart';
 import '../model/row_height.dart';
 import '../model/row_model.dart';
@@ -400,8 +401,10 @@ class FitGrid<T> extends StatefulWidget {
   /// mouse, Shift+clicking, or Shift+arrow keys — as well as whole rows.
   ///
   /// A range copies as that rectangle, pastes into editable columns from its
-  /// top-left cell, and Delete clears the editable cells in it. The range lives
-  /// on [FitGridController.range].
+  /// top-left cell, and Delete clears the editable cells in it. A handle on its
+  /// corner fills neighbouring cells when dragged — continuing a series of
+  /// numbers, repeating anything else (see [fitGridFillSeries]). The range
+  /// lives on [FitGridController.range].
   final bool cellSelection;
 
   /// Whether Ctrl+V (Cmd+V) pastes tab-separated text into the grid, starting
@@ -1012,6 +1015,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
           ? _hoveredRow
           : -1,
       dropLine: _rowDropLine,
+      fillHandleCell: _fillHandleCell(columns, rowsView),
+      fillPreview: _fillPreviewRange(columns, rowsView),
       rowIndexOffset: pageOffset,
       cellSpan: rowsView.displayAt == null
           ? null
@@ -1715,19 +1720,32 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       rows: rows,
       child: child,
     );
-    if (!widget.reorderableRows || widget.dataSource != null) return gestures;
+    final dragsRows = widget.reorderableRows && widget.dataSource == null;
+    if (!dragsRows && !widget.cellSelection) return gestures;
     return RawGestureDetector(
       gestures: <Type, GestureRecognizerFactory>{
-        _RowDragRecognizer:
-            GestureRecognizerFactoryWithHandlers<_RowDragRecognizer>(
-              () => _RowDragRecognizer(),
-              (recognizer) => recognizer
-                ..claims = ((position) =>
-                    _rowDragStart(position, columns, rows))
-                ..onUpdate = ((position) => _rowDragUpdate(position, rows))
-                ..onEnd = (() => _rowDragEnd(rows))
-                ..onCancel = _rowDragCancel,
-            ),
+        if (widget.cellSelection)
+          _FillDragRecognizer:
+              GestureRecognizerFactoryWithHandlers<_FillDragRecognizer>(
+                () => _FillDragRecognizer(),
+                (recognizer) => recognizer
+                  ..claims = ((position) => _fillStart(position))
+                  ..onUpdate = ((position) =>
+                      _fillUpdate(position, columns, rows))
+                  ..onEnd = (() => _fillEnd(columns, rows))
+                  ..onCancel = _fillCancel,
+              ),
+        if (dragsRows)
+          _RowDragRecognizer:
+              GestureRecognizerFactoryWithHandlers<_RowDragRecognizer>(
+                () => _RowDragRecognizer(),
+                (recognizer) => recognizer
+                  ..claims = ((position) =>
+                      _rowDragStart(position, columns, rows))
+                  ..onUpdate = ((position) => _rowDragUpdate(position, rows))
+                  ..onEnd = (() => _rowDragEnd(rows))
+                  ..onCancel = _rowDragCancel,
+              ),
       },
       child: gestures,
     );
@@ -1872,6 +1890,247 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     widget.onCellTap?.call(row, globalRow, column.id);
   }
 
+  /// Where a fill drag has reached — a row into the rows as displayed and a
+  /// column id — or null when no fill is under way.
+  (int, String)? _fillTarget;
+  bool _filling = false;
+
+  /// The cell carrying the fill handle, in the section's own indices: the
+  /// far corner of the range, when the range holds something a fill can
+  /// write to.
+  (int, int) _fillHandleCell(
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows,
+  ) {
+    if (!widget.cellSelection) return (-1, -1);
+    final range = _controller.range.range;
+    if (range == null) return (-1, -1);
+    final cols = _rangeColumns(range, columns);
+    if (!cols.any((column) => column.isEditable)) return (-1, -1);
+    final lastLocal = _lastLocalRow(range, rows);
+    if (lastLocal < 0) return (-1, -1);
+    final lastColumn = columns.indexOf(cols.last);
+    return (lastLocal, lastColumn);
+  }
+
+  /// The local line of the range's lowest row, or -1 when it is not on this
+  /// page.
+  int _lastLocalRow(FitGridCellRange range, FitGridRowsView<T> rows) {
+    if (rows.displayAt == null) return rows.localIndex(range.lastRow);
+    final a = rows.localIndex(range.anchorRow);
+    final b = rows.localIndex(range.extentRow);
+    return a < 0 || b < 0 ? -1 : math.max(a, b);
+  }
+
+  bool _fillStart(Offset globalPosition) {
+    if (!widget.cellSelection || _controller.range.range == null) return false;
+    final render = _sectionKey.currentContext?.findRenderObject();
+    if (render is! RenderFitGridSection) return false;
+    if (!render.hitsFillHandle(render.globalToLocal(globalPosition))) {
+      return false;
+    }
+    setState(() {
+      _filling = true;
+      _fillTarget = null;
+    });
+    return true;
+  }
+
+  void _fillUpdate(
+    Offset globalPosition,
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows,
+  ) {
+    if (!_filling) return;
+    _autoScrollForDrag(globalPosition);
+    final cell = _rangeCellAt(globalPosition, columns, rows, clamp: true);
+    if (cell == null || cell == _fillTarget) return;
+    setState(() => _fillTarget = cell);
+  }
+
+  void _fillCancel() {
+    if (!_filling && _fillTarget == null) return;
+    setState(() {
+      _filling = false;
+      _fillTarget = null;
+    });
+  }
+
+  void _fillEnd(List<FitGridColumn<T>> columns, FitGridRowsView<T> rows) {
+    final range = _controller.range.range;
+    final target = _fillTarget;
+    _fillCancel();
+    if (range == null || target == null) return;
+    final plan = _planFill(range, target, columns, rows);
+    if (plan == null) return;
+    _applyEdits(plan.edits);
+    _controller.range.range = plan.covered;
+  }
+
+  /// The block a fill would write, outlined during the drag.
+  (int, int, int, int) _fillPreviewRange(
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows,
+  ) {
+    final range = _controller.range.range;
+    final target = _fillTarget;
+    if (!_filling || range == null || target == null) {
+      return RenderFitGridSection.noRange;
+    }
+    final plan = _planFill(range, target, columns, rows);
+    if (plan == null) return RenderFitGridSection.noRange;
+    final ids = <String>[for (final column in columns) column.id];
+    final c0 = ids.indexOf(plan.covered.anchorColumnId);
+    final c1 = ids.indexOf(plan.covered.extentColumnId);
+    final r0 = rows.localIndex(plan.covered.anchorRow);
+    final r1 = rows.localIndex(plan.covered.extentRow);
+    if (c0 < 0 || c1 < 0 || r0 < 0 || r1 < 0) {
+      return RenderFitGridSection.noRange;
+    }
+    return (
+      math.min(r0, r1),
+      math.max(r0, r1),
+      math.min(c0, c1),
+      math.max(c0, c1),
+    );
+  }
+
+  /// What a fill from [range] to [target] writes, and the range it leaves
+  /// selected — or null when the target is inside the range.
+  ///
+  /// A fill runs along one axis: down or up when the target is past the
+  /// range's rows, left or right when it is past its columns, and whichever
+  /// it is further past when it is both.
+  _FillPlan<T>? _planFill(
+    FitGridCellRange range,
+    (int, String) target,
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows,
+  ) {
+    final sourceRows = _rangeRows(range, rows);
+    final sourceCols = _rangeColumns(range, columns);
+    if (sourceRows.isEmpty || sourceCols.isEmpty) return null;
+
+    // Everything in display order: local lines for rows, data columns for
+    // columns, so grouping and hidden columns do not bend the geometry.
+    final line = <int>[for (final r in sourceRows) rows.localIndex(r)];
+    if (line.any((l) => l < 0)) return null;
+    final dataCols = <FitGridColumn<T>>[
+      for (final column in columns)
+        if (!_isSynthetic(column)) column,
+    ];
+    final firstCol = dataCols.indexOf(sourceCols.first);
+    final lastCol = dataCols.indexOf(sourceCols.last);
+    final targetLine = rows.localIndex(target.$1);
+    final targetCol = dataCols.indexWhere((c) => c.id == target.$2);
+    if (targetLine < 0 || targetCol < 0) return null;
+
+    final down = targetLine - line.last;
+    final up = line.first - targetLine;
+    final right = targetCol - lastCol;
+    final left = firstCol - targetCol;
+    final vertical = math.max(down, up);
+    final horizontal = math.max(right, left);
+    if (vertical <= 0 && horizontal <= 0) return null;
+
+    String textOf(FitGridColumn<T> column, T row) =>
+        column.editor?.initialText?.call(row) ?? column.value(row);
+
+    final edits = <FitGridCellEdit<T>>[];
+    if (vertical >= horizontal) {
+      final backwards = up > down;
+      // The data rows beyond the range, nearest first.
+      final targets = <int>[];
+      if (backwards) {
+        for (var l = line.first - 1; l >= targetLine; l--) {
+          if (!rows.isControl(l) && rows.rowAt(l) != null) {
+            targets.add(rows.globalIndex(l));
+          }
+        }
+      } else {
+        for (var l = line.last + 1; l <= targetLine; l++) {
+          if (!rows.isControl(l) && rows.rowAt(l) != null) {
+            targets.add(rows.globalIndex(l));
+          }
+        }
+      }
+      if (targets.isEmpty) return null;
+      for (final column in sourceCols) {
+        final source = <String>[
+          for (final r in sourceRows)
+            if (_rowForGlobalIndex(r) case final row?) textOf(column, row),
+        ];
+        final values = fitGridFillSeries(
+          source,
+          targets.length,
+          backwards: backwards,
+        );
+        for (var k = 0; k < targets.length; k++) {
+          final row = _rowForGlobalIndex(targets[k]);
+          if (row == null) continue;
+          edits.add(
+            FitGridCellEdit<T>(
+              row: row,
+              rowIndex: targets[k],
+              column: column,
+              value: values[k],
+            ),
+          );
+        }
+      }
+      final far = targets.last;
+      return _FillPlan<T>(
+        edits,
+        FitGridCellRange(
+          anchorRow: backwards ? sourceRows.last : sourceRows.first,
+          anchorColumnId: sourceCols.first.id,
+          extentRow: far,
+          extentColumnId: sourceCols.last.id,
+        ),
+      );
+    }
+
+    final backwards = left > right;
+    final targetCols = backwards
+        ? <FitGridColumn<T>>[
+            for (var c = firstCol - 1; c >= targetCol; c--) dataCols[c],
+          ]
+        : <FitGridColumn<T>>[
+            for (var c = lastCol + 1; c <= targetCol; c++) dataCols[c],
+          ];
+    for (final index in sourceRows) {
+      final row = _rowForGlobalIndex(index);
+      if (row == null) continue;
+      final source = <String>[
+        for (final column in sourceCols) textOf(column, row),
+      ];
+      final values = fitGridFillSeries(
+        source,
+        targetCols.length,
+        backwards: backwards,
+      );
+      for (var k = 0; k < targetCols.length; k++) {
+        edits.add(
+          FitGridCellEdit<T>(
+            row: row,
+            rowIndex: index,
+            column: targetCols[k],
+            value: values[k],
+          ),
+        );
+      }
+    }
+    return _FillPlan<T>(
+      edits,
+      FitGridCellRange(
+        anchorRow: sourceRows.first,
+        anchorColumnId: backwards ? sourceCols.last.id : sourceCols.first.id,
+        extentRow: sourceRows.last,
+        extentColumnId: targetCols.last.id,
+      ),
+    );
+  }
+
   /// The row being dragged, by index into the rows as displayed, or null.
   int? _rowDragFrom;
 
@@ -1997,6 +2256,12 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   ) {
     if (event.kind != PointerDeviceKind.mouse ||
         event.buttons != kPrimaryMouseButton) {
+      return;
+    }
+    final render = _sectionKey.currentContext?.findRenderObject();
+    if (render is RenderFitGridSection &&
+        render.hitsFillHandle(render.globalToLocal(event.position))) {
+      // The fill handle's own recognizer has this press.
       return;
     }
     final cell = _rangeCellAt(event.position, columns, rows);
@@ -3512,4 +3777,20 @@ class _RowDragRecognizer extends OneSequenceGestureRecognizer {
 
   @override
   String get debugDescription => 'fitgrid row drag';
+}
+
+/// Claims presses on the fill handle, the way [_RowDragRecognizer] claims
+/// presses on a row's drag handle. A type of its own so both can sit in one
+/// gesture map.
+class _FillDragRecognizer extends _RowDragRecognizer {
+  @override
+  String get debugDescription => 'fitgrid fill drag';
+}
+
+/// The edits a fill makes and the range it leaves selected.
+class _FillPlan<T> {
+  const _FillPlan(this.edits, this.covered);
+
+  final List<FitGridCellEdit<T>> edits;
+  final FitGridCellRange covered;
 }

@@ -71,6 +71,7 @@ export 'src/model/enums.dart'
         FitGridOverflow,
         FitGridSelectionMode,
         FitGridSortDirection;
+export 'src/model/fill_series.dart' show fitGridFillSeries;
 export 'src/model/fitgrid_editor.dart'
     show
         FitGridCellCommit,
