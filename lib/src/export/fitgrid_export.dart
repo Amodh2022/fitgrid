@@ -21,11 +21,11 @@ class FitGridExportRow {
 /// The grid's contents, in the shape an exporter wants.
 ///
 /// The point of this type is that it has no opinion about a file format.
-/// Writing an xlsx or a PDF means a zip writer, an XML schema and a font stack,
-/// and a data grid that dragged all three into every application depending on
-/// it would be charging most of them for a feature they never call. So the grid
-/// produces the rows, and a companion package — or three lines of your own —
-/// writes the file.
+/// The package writes three from it without a single dependency — CSV and TSV
+/// with [fitGridToCsv] and [fitGridToTsv], and Excel with `fitGridToXlsx` —
+/// and anything else (a PDF, a styled workbook) is a writer of your own over
+/// the same rows, rather than a font stack and an XML schema dragged into
+/// every application whether it exports or not.
 class FitGridExportData {
   const FitGridExportData({required this.headers, required this.rows});
 

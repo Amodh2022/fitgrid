@@ -50,6 +50,7 @@ export 'src/export/fitgrid_export.dart'
         fitGridToCsv,
         fitGridToDelimited,
         fitGridToTsv;
+export 'src/export/fitgrid_xlsx.dart' show fitGridToXlsx;
 export 'src/model/data_source.dart'
     show
         FitGridAsyncDataSource,
