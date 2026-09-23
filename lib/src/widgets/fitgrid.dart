@@ -93,6 +93,7 @@ class FitGrid<T> extends StatefulWidget {
     this.showFooter = true,
     this.resizableColumns = true,
     this.reorderableColumns = false,
+    this.multiSort = true,
     this.paginated = false,
     this.pageSize,
     this.pagerBuilder,
@@ -185,6 +186,13 @@ class FitGrid<T> extends StatefulWidget {
   /// Off by default: a grid whose column order carries meaning should not lose
   /// it to a stray drag.
   final bool reorderableColumns;
+
+  /// Whether Shift+click on a sortable header adds that column to the sort
+  /// rather than replacing it. Each sorted header then shows its priority.
+  ///
+  /// The controller can always sort by several columns — see
+  /// [FitGridController.setSort] — this only governs the gesture.
+  final bool multiSort;
 
   /// Shows one page of rows at a time, with a pager below the grid.
   ///
@@ -736,8 +744,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
               horizontalOffset: _horizontalController.hasClients
                   ? _horizontalController.offset
                   : 0.0,
-              sortColumnId: controller.data.sortColumnId,
-              sortDirection: controller.data.sortDirection,
+              sortKeys: controller.data.sortKeys,
               onSort: _sort,
               onResize: widget.resizableColumns
                   ? controller.columns.setWidth
@@ -1003,13 +1010,15 @@ class _FitGridState<T> extends State<FitGrid<T>> {
 
   void _sort(String columnId) {
     final controller = _controller;
-    controller.toggleSort(columnId);
+    // Shift+click adds the column to the sort instead of replacing it — the
+    // convention every spreadsheet and desktop table shares.
+    controller.toggleSort(
+      columnId,
+      additive: widget.multiSort && HardwareKeyboard.instance.isShiftPressed,
+    );
     // A source sorts for itself; sorting a window would order page two
     // differently from page three.
-    widget.dataSource?.sortBy(
-      controller.data.sortColumnId,
-      controller.data.sortDirection,
-    );
+    widget.dataSource?.sortByKeys(controller.data.sortKeys);
   }
 
   // ------------------------------------------------------------- gestures

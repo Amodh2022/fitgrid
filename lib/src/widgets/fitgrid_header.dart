@@ -5,6 +5,7 @@ import 'package:flutter/semantics.dart';
 
 import '../model/enums.dart';
 import '../model/fitgrid_column.dart';
+import '../model/sort_key.dart';
 import '../sizing/column_layout.dart';
 import '../theme/fitgrid_theme.dart';
 
@@ -27,8 +28,9 @@ class FitGridHeader<T> extends StatelessWidget {
     required this.layout,
     required this.theme,
     required this.horizontalOffset,
-    required this.sortColumnId,
-    required this.sortDirection,
+    this.sortColumnId,
+    this.sortDirection = FitGridSortDirection.none,
+    this.sortKeys = const <FitGridSortKey>[],
     required this.onSort,
     this.onResize,
     this.onAutoSize,
@@ -42,7 +44,28 @@ class FitGridHeader<T> extends StatelessWidget {
   final double horizontalOffset;
   final String? sortColumnId;
   final FitGridSortDirection sortDirection;
+
+  /// The whole sort, highest priority first. When it is set it wins over
+  /// [sortColumnId] and [sortDirection], and with more than one key each
+  /// sorted header shows its priority beside the arrow.
+  final List<FitGridSortKey> sortKeys;
+
   final ValueChanged<String>? onSort;
+
+  /// Where a column sits in the sort and which way it runs, or (-1, none).
+  (int, FitGridSortDirection) sortStateOf(String columnId) {
+    if (sortKeys.isNotEmpty) {
+      for (var i = 0; i < sortKeys.length; i++) {
+        if (sortKeys[i].columnId == columnId) {
+          return (i, sortKeys[i].direction);
+        }
+      }
+      return (-1, FitGridSortDirection.none);
+    }
+    return columnId == sortColumnId
+        ? (0, sortDirection)
+        : (-1, FitGridSortDirection.none);
+  }
 
   /// Called with a column id and the width the user has dragged it to. The
   /// width is raw: the sizer still clamps it against the column's own policy,
@@ -211,9 +234,12 @@ class _Band<T> extends StatelessWidget {
               width: layout.widths[i],
               theme: header.theme,
               isLast: i == layout.length - 1,
-              direction: header.columns[i].id == header.sortColumnId
-                  ? header.sortDirection
-                  : FitGridSortDirection.none,
+              direction: header.sortStateOf(header.columns[i].id).$2,
+              // A priority is only worth showing when there is more than one
+              // key to rank: "1" beside the only sorted column is noise.
+              sortPriority: header.sortKeys.length > 1
+                  ? header.sortStateOf(header.columns[i].id).$1
+                  : -1,
               onTap: header.columns[i].sortable && header.onSort != null
                   ? () => header.onSort!(header.columns[i].id)
                   : null,
@@ -358,6 +384,7 @@ class _HeaderCell<T> extends StatelessWidget {
     required this.direction,
     required this.onTap,
     required this.onReorder,
+    this.sortPriority = -1,
   });
 
   final FitGridColumn<T> column;
@@ -365,6 +392,9 @@ class _HeaderCell<T> extends StatelessWidget {
   final FitGridThemeData theme;
   final bool isLast;
   final FitGridSortDirection direction;
+
+  /// Zero-based rank in a multi-column sort, or -1 to show none.
+  final int sortPriority;
   final VoidCallback? onTap;
   final void Function(String movedId, String targetId)? onReorder;
 
@@ -395,7 +425,8 @@ class _HeaderCell<T> extends StatelessWidget {
     // width left by the time the padding has taken its share.
     Widget content = LayoutBuilder(
       builder: (context, constraints) {
-        final affordance = theme.sortIconSize + _sortGap;
+        final badge = sortPriority >= 0 ? theme.sortIconSize * 0.7 : 0.0;
+        final affordance = theme.sortIconSize + _sortGap + badge;
         final showSort =
             column.sortable &&
             constraints.maxWidth >= affordance + _minLabelWidth;
@@ -426,6 +457,19 @@ class _HeaderCell<T> extends StatelessWidget {
                     ? theme.sortIconColor.withValues(alpha: 0.35)
                     : theme.sortIconColor,
               ),
+              if (sortPriority >= 0)
+                SizedBox(
+                  width: badge,
+                  child: Text(
+                    '${sortPriority + 1}',
+                    style: theme.headerTextStyle.copyWith(
+                      fontSize: theme.sortIconSize * 0.6,
+                      color: theme.sortIconColor,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.clip,
+                  ),
+                ),
             ],
           ],
         );
@@ -454,10 +498,13 @@ class _HeaderCell<T> extends StatelessWidget {
       hint: onTap == null
           ? null
           : switch (direction) {
-              FitGridSortDirection.ascending => 'sorted ascending',
-              FitGridSortDirection.descending => 'sorted descending',
-              FitGridSortDirection.none => 'not sorted',
-            },
+                  FitGridSortDirection.ascending => 'sorted ascending',
+                  FitGridSortDirection.descending => 'sorted descending',
+                  FitGridSortDirection.none => 'not sorted',
+                } +
+                (sortPriority >= 0
+                    ? ', sort priority ${sortPriority + 1}'
+                    : ''),
       child: DecoratedBox(
         decoration: BoxDecoration(
           border: isLast

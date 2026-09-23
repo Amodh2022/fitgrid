@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../model/enums.dart';
 import '../export/fitgrid_export.dart';
 import '../model/fitgrid_column.dart';
+import '../model/sort_key.dart';
 import '../sizing/column_order.dart';
 import 'fitgrid_editing.dart';
 import 'fitgrid_filter.dart';
@@ -43,15 +44,32 @@ class FitGridDataState<T> extends ChangeNotifier {
     notifyListeners();
   }
 
-  String? _sortColumnId;
+  List<FitGridSortKey> _sortKeys = const <FitGridSortKey>[];
+  List<Comparator<T>> _comparators = <Comparator<T>>[];
 
-  /// Id of the column currently ordering the grid, or null when unsorted.
-  String? get sortColumnId => _sortColumnId;
+  /// The active sort, highest priority first. Empty when unsorted.
+  List<FitGridSortKey> get sortKeys => _sortKeys;
 
-  FitGridSortDirection _sortDirection = FitGridSortDirection.none;
-  FitGridSortDirection get sortDirection => _sortDirection;
+  /// Id of the column deciding the order, or null when unsorted. With several
+  /// sort keys this is the first of them.
+  String? get sortColumnId =>
+      _sortKeys.isEmpty ? null : _sortKeys.first.columnId;
 
-  Comparator<T>? _comparator;
+  /// Direction of the primary sort key.
+  FitGridSortDirection get sortDirection =>
+      _sortKeys.isEmpty ? FitGridSortDirection.none : _sortKeys.first.direction;
+
+  /// The direction [columnId] is sorted in, whatever its priority.
+  FitGridSortDirection directionOf(String columnId) {
+    for (final key in _sortKeys) {
+      if (key.columnId == columnId) return key.direction;
+    }
+    return FitGridSortDirection.none;
+  }
+
+  /// Where [columnId] sits in the sort, from 0, or -1 when it is not sorted.
+  int sortPriorityOf(String columnId) =>
+      _sortKeys.indexWhere((key) => key.columnId == columnId);
 
   /// The rows in display order.
   List<T> get view => _view ??= _buildView();
@@ -60,17 +78,39 @@ class FitGridDataState<T> extends ChangeNotifier {
 
   T operator [](int index) => view[index];
 
-  /// Applies a sort. Passing [FitGridSortDirection.none] clears it and returns
-  /// the rows to their original order — which is why the unsorted list is kept
-  /// rather than sorted in place.
+  /// Sorts by one column, replacing any other sort. Passing
+  /// [FitGridSortDirection.none] clears it and returns the rows to their
+  /// original order — which is why the unsorted list is kept rather than
+  /// sorted in place.
   void sort(
     String columnId,
     FitGridSortDirection direction,
     Comparator<T> comparator,
   ) {
-    _sortColumnId = direction == FitGridSortDirection.none ? null : columnId;
-    _sortDirection = direction;
-    _comparator = direction == FitGridSortDirection.none ? null : comparator;
+    if (direction == FitGridSortDirection.none) {
+      sortBy(const <FitGridSortKey>[], const []);
+    } else {
+      sortBy(
+        <FitGridSortKey>[FitGridSortKey(columnId, direction)],
+        [comparator],
+      );
+    }
+  }
+
+  /// Sorts by several columns at once, [keys] in priority order and
+  /// [comparators] parallel to them.
+  ///
+  /// Ties on every key keep their original relative order: the sort is
+  /// stable, so "by department, then by name" never shuffles two people with
+  /// the same name in the same department.
+  void sortBy(List<FitGridSortKey> keys, List<Comparator<T>> comparators) {
+    assert(keys.length == comparators.length);
+    assert(
+      keys.every((key) => key.direction != FitGridSortDirection.none),
+      'An unsorted column is left out of the keys, not given `none`.',
+    );
+    _sortKeys = List<FitGridSortKey>.unmodifiable(keys);
+    _comparators = List<Comparator<T>>.of(comparators);
     _view = null;
     notifyListeners();
   }
@@ -78,8 +118,7 @@ class FitGridDataState<T> extends ChangeNotifier {
   /// The next state in the tri-state cycle for [columnId]: ascending, then
   /// descending, then unsorted.
   FitGridSortDirection nextDirectionFor(String columnId) {
-    if (_sortColumnId != columnId) return FitGridSortDirection.ascending;
-    return switch (_sortDirection) {
+    return switch (directionOf(columnId)) {
       FitGridSortDirection.ascending => FitGridSortDirection.descending,
       FitGridSortDirection.descending => FitGridSortDirection.none,
       FitGridSortDirection.none => FitGridSortDirection.ascending,
@@ -88,22 +127,35 @@ class FitGridDataState<T> extends ChangeNotifier {
 
   List<T> _buildView() {
     final filter = _filter;
-    final comparator = _comparator;
     // An unfiltered, unsorted grid hands back the original list rather than a
     // copy of it: downstream caches are keyed on its identity, so copying here
     // would invalidate the column measurement on every build.
-    if (filter == null && comparator == null) return _rows;
+    if (filter == null && _sortKeys.isEmpty) return _rows;
     final base = filter == null
         ? _rows
         : <T>[
             for (final row in _rows)
               if (filter(row)) row,
           ];
-    if (comparator == null) return base;
-    final sorted = List<T>.of(base);
-    final sign = _sortDirection == FitGridSortDirection.descending ? -1 : 1;
-    sorted.sort((a, b) => sign * comparator(a, b));
-    return sorted;
+    if (_sortKeys.isEmpty) return base;
+    return _stableSort(base);
+  }
+
+  /// Dart's `List.sort` is not stable, and a multi-key sort leans on
+  /// stability for its last tie-break: rows equal on every key should stay in
+  /// the order they were supplied. So the original position is the final key.
+  List<T> _stableSort(List<T> base) {
+    final keys = _sortKeys;
+    final comparators = _comparators;
+    final order = List<int>.generate(base.length, (i) => i);
+    order.sort((a, b) {
+      for (var k = 0; k < keys.length; k++) {
+        final result = comparators[k](base[a], base[b]);
+        if (result != 0) return keys[k].descending ? -result : result;
+      }
+      return a - b;
+    });
+    return <T>[for (final i in order) base[i]];
   }
 }
 
@@ -441,11 +493,55 @@ class FitGridController<T> {
   }
 
   /// Cycles the sort on a column: ascending, descending, unsorted.
-  void toggleSort(String columnId) {
+  ///
+  /// With [additive] — what Shift+click on a header does — the column is
+  /// added to the existing sort as its lowest-priority key rather than
+  /// replacing it, and cycling it off removes only that key. Without it the
+  /// column becomes the whole sort, which is what a plain click has always
+  /// meant.
+  void toggleSort(String columnId, {bool additive = false}) {
     final column = columns.byId(columnId);
     if (column == null || !column.sortable) return;
-    data.sort(columnId, data.nextDirectionFor(columnId), column.compare);
+    final next = data.nextDirectionFor(columnId);
+    if (!additive) {
+      data.sort(columnId, next, column.compare);
+      return;
+    }
+    final keys = <FitGridSortKey>[
+      for (final key in data.sortKeys)
+        if (key.columnId != columnId) key,
+    ];
+    final at = data.sortPriorityOf(columnId);
+    if (next != FitGridSortDirection.none) {
+      // A key already in the sort keeps its priority as it flips direction.
+      keys.insert(at < 0 ? keys.length : at, FitGridSortKey(columnId, next));
+    }
+    setSort(keys);
   }
+
+  /// Replaces the whole sort, highest priority first.
+  ///
+  /// Keys naming a column that does not exist or is not sortable are dropped,
+  /// as are repeats, so a sort restored from saved state cannot wedge the grid
+  /// on a column that has since been removed.
+  void setSort(List<FitGridSortKey> keys) {
+    final kept = <FitGridSortKey>[];
+    final comparators = <Comparator<T>>[];
+    final seen = <String>{};
+    for (final key in keys) {
+      if (key.direction == FitGridSortDirection.none) continue;
+      final column = columns.byId(key.columnId);
+      if (column == null || !column.sortable || !seen.add(key.columnId)) {
+        continue;
+      }
+      kept.add(key);
+      comparators.add(column.compare);
+    }
+    data.sortBy(kept, comparators);
+  }
+
+  /// Removes every sort key, returning the rows to their supplied order.
+  void clearSort() => data.sortBy(const <FitGridSortKey>[], <Comparator<T>>[]);
 
   /// The grid's contents in the shape an exporter wants.
   ///

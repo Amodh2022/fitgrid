@@ -77,6 +77,7 @@ export 'src/model/row_model.dart'
         flattenGroups,
         flattenTree;
 export 'src/model/rows_view.dart' show FitGridRowsView;
+export 'src/model/sort_key.dart' show FitGridSortKey;
 export 'src/model/row_height.dart'
     show FitGridContentRowHeight, FitGridFixedRowHeight, FitGridRowHeight;
 export 'src/sizing/column_layout.dart' show FitGridColumnLayout;
