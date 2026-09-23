@@ -29,6 +29,8 @@ class FitGridThemeData {
     required this.placeholderForeground,
     required this.tooltipBackground,
     required this.tooltipForeground,
+    required this.searchHighlight,
+    required this.frozenShadow,
     this.density = FitGridDensity.standard,
     this.dividerThickness = 1.0,
     this.borderRadius = const BorderRadius.all(Radius.circular(12)),
@@ -43,6 +45,10 @@ class FitGridThemeData {
     this.sortUnsortedIcon = Icons.unfold_more_rounded,
     this.resizeGripIcon = Icons.drag_indicator,
     this.sortIconSize = 18.0,
+    this.cellIconSize = 16.0,
+    this.cellIconGap = 6.0,
+    this.focusRingWidth = 2.0,
+    this.frozenShadowExtent = 8.0,
     this.headerPadding,
     this.cellPadding,
     this.headerHeight,
@@ -101,6 +107,10 @@ class FitGridThemeData {
       placeholderForeground: scheme.onSurfaceVariant.withValues(alpha: 0.6),
       tooltipBackground: scheme.inverseSurface,
       tooltipForeground: scheme.onInverseSurface,
+      // A highlight has to survive being painted behind text that was never
+      // chosen to contrast with it, so it is a wash rather than a fill.
+      searchHighlight: scheme.tertiary.withValues(alpha: isDark ? 0.38 : 0.28),
+      frozenShadow: Colors.black.withValues(alpha: isDark ? 0.45 : 0.16),
       density: density,
     );
   }
@@ -134,6 +144,13 @@ class FitGridThemeData {
 
   /// Text colour of that label.
   final Color tooltipForeground;
+
+  /// Wash painted behind characters matched by the active search.
+  final Color searchHighlight;
+
+  /// Colour of the gradient cast by a pinned column band over the content
+  /// scrolling beneath it.
+  final Color frozenShadow;
 
   /// Vertical rhythm. Drives the defaults for padding and row height.
   final FitGridDensity density;
@@ -178,6 +195,18 @@ class FitGridThemeData {
   /// Grip drawn on a resizable column divider.
   final IconData resizeGripIcon;
   final double sortIconSize;
+
+  /// Size of a glyph painted inside a cell by [FitGridColumn.icon].
+  final double cellIconSize;
+
+  /// Gap between that glyph and the cell's text.
+  final double cellIconGap;
+
+  /// Stroke width of the ring drawn around the keyboard's current cell.
+  final double focusRingWidth;
+
+  /// How far the pinned-band shadow reaches over the scrolling content.
+  final double frozenShadowExtent;
 
   /// Overrides for the density-derived defaults. Null means "follow
   /// [density]", which is what the `effective*` getters resolve.
@@ -233,6 +262,8 @@ class FitGridThemeData {
     Color? placeholderForeground,
     Color? tooltipBackground,
     Color? tooltipForeground,
+    Color? searchHighlight,
+    Color? frozenShadow,
     FitGridDensity? density,
     double? dividerThickness,
     BorderRadius? borderRadius,
@@ -247,6 +278,10 @@ class FitGridThemeData {
     IconData? sortUnsortedIcon,
     IconData? resizeGripIcon,
     double? sortIconSize,
+    double? cellIconSize,
+    double? cellIconGap,
+    double? focusRingWidth,
+    double? frozenShadowExtent,
     EdgeInsets? headerPadding,
     EdgeInsets? cellPadding,
     double? headerHeight,
@@ -271,6 +306,8 @@ class FitGridThemeData {
           placeholderForeground ?? this.placeholderForeground,
       tooltipBackground: tooltipBackground ?? this.tooltipBackground,
       tooltipForeground: tooltipForeground ?? this.tooltipForeground,
+      searchHighlight: searchHighlight ?? this.searchHighlight,
+      frozenShadow: frozenShadow ?? this.frozenShadow,
       density: density ?? this.density,
       dividerThickness: dividerThickness ?? this.dividerThickness,
       borderRadius: borderRadius ?? this.borderRadius,
@@ -286,6 +323,10 @@ class FitGridThemeData {
       sortUnsortedIcon: sortUnsortedIcon ?? this.sortUnsortedIcon,
       resizeGripIcon: resizeGripIcon ?? this.resizeGripIcon,
       sortIconSize: sortIconSize ?? this.sortIconSize,
+      cellIconSize: cellIconSize ?? this.cellIconSize,
+      cellIconGap: cellIconGap ?? this.cellIconGap,
+      focusRingWidth: focusRingWidth ?? this.focusRingWidth,
+      frozenShadowExtent: frozenShadowExtent ?? this.frozenShadowExtent,
       headerPadding: headerPadding ?? this.headerPadding,
       cellPadding: cellPadding ?? this.cellPadding,
       headerHeight: headerHeight ?? this.headerHeight,
@@ -313,6 +354,12 @@ class FitGridThemeData {
         other.placeholderForeground == placeholderForeground &&
         other.tooltipBackground == tooltipBackground &&
         other.tooltipForeground == tooltipForeground &&
+        other.searchHighlight == searchHighlight &&
+        other.frozenShadow == frozenShadow &&
+        other.cellIconSize == cellIconSize &&
+        other.cellIconGap == cellIconGap &&
+        other.focusRingWidth == focusRingWidth &&
+        other.frozenShadowExtent == frozenShadowExtent &&
         other.density == density &&
         other.dividerThickness == dividerThickness &&
         other.borderRadius == borderRadius &&
@@ -351,6 +398,12 @@ class FitGridThemeData {
     placeholderForeground,
     tooltipBackground,
     tooltipForeground,
+    searchHighlight,
+    frozenShadow,
+    cellIconSize,
+    cellIconGap,
+    focusRingWidth,
+    frozenShadowExtent,
     density,
     dividerThickness,
     borderRadius,

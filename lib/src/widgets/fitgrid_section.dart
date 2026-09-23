@@ -23,8 +23,13 @@ class FitGridSection extends MultiChildRenderObjectWidget {
     required this.horizontal,
     this.overscanRows = 2,
     this.rowColor,
+    this.isRowSelected,
     this.striped = true,
     this.editingCell = (-1, -1),
+    this.focusedCell = (-1, -1),
+    this.hoveredRow = -1,
+    this.rowIndexOffset = 0,
+    this.onCellActivate,
     super.children,
     super.key,
   });
@@ -39,7 +44,25 @@ class FitGridSection extends MultiChildRenderObjectWidget {
   final ViewportOffset horizontal;
   final int overscanRows;
   final FitGridRowColorResolver? rowColor;
+
+  /// Whether a row is selected, for the semantics tree. Separate from
+  /// [rowColor] because "selected" is a state a screen reader announces, and a
+  /// colour is not.
+  final FitGridRowFlagResolver? isRowSelected;
   final bool striped;
+
+  /// The cell carrying the keyboard focus ring, or (-1, -1).
+  final (int, int) focusedCell;
+
+  /// The row under the pointer, or -1.
+  final int hoveredRow;
+
+  /// Added to a local row index to name it in the full dataset. Non-zero only
+  /// when paginated, and used only by semantics.
+  final int rowIndexOffset;
+
+  /// Invoked when a screen reader activates a cell.
+  final void Function(int row, int column)? onCellActivate;
 
   /// The cell an editor is covering, as (row, column) indices into this
   /// section, or (-1, -1) when none is open.
@@ -60,9 +83,15 @@ class FitGridSection extends MultiChildRenderObjectWidget {
       horizontal: horizontal,
       overscanRows: overscanRows,
       rowColor: rowColor,
+      isRowSelected: isRowSelected,
       striped: striped,
       editingRow: editingCell.$1,
       editingColumn: editingCell.$2,
+      focusedRow: focusedCell.$1,
+      focusedColumn: focusedCell.$2,
+      hoveredRow: hoveredRow,
+      rowIndexOffset: rowIndexOffset,
+      onCellActivate: onCellActivate,
     );
   }
 
@@ -84,8 +113,13 @@ class FitGridSection extends MultiChildRenderObjectWidget {
       ..horizontal = horizontal
       ..overscanRows = overscanRows
       ..rowColor = rowColor
+      ..isRowSelected = isRowSelected
       ..striped = striped
-      ..editingCell = editingCell;
+      ..editingCell = editingCell
+      ..focusedCell = focusedCell
+      ..hoveredRow = hoveredRow
+      ..rowIndexOffset = rowIndexOffset
+      ..onCellActivate = onCellActivate;
   }
 }
 

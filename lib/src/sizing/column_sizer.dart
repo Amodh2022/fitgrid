@@ -3,9 +3,11 @@ import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 
 import '../model/column_width.dart';
+import '../model/enums.dart';
 import '../model/fitgrid_column.dart';
 import '../theme/fitgrid_theme.dart';
 import 'column_layout.dart';
+import 'column_order.dart';
 
 /// Turns column width *policies* into actual pixel widths by measuring the
 /// content.
@@ -42,10 +44,9 @@ class FitGridColumnSizer {
     Map<String, double> overrides = const <String, double>{},
     bool stretchToFill = true,
   }) {
-    final visible = <FitGridColumn<T>>[
-      for (final column in columns)
-        if (column.visible) column,
-    ];
+    // Already partitioned when the caller came through the controller; doing
+    // it again is O(columns) and keeps a direct caller honest.
+    final visible = fitGridVisibleColumns(columns);
     if (visible.isEmpty) return FitGridColumnLayout.empty;
 
     final headerChrome =
@@ -144,6 +145,7 @@ class FitGridColumnSizer {
     return FitGridColumnLayout(
       ids: <String>[for (final column in visible) column.id],
       widths: widths,
+      freezes: <FitGridFreeze>[for (final column in visible) column.freeze],
     );
   }
 

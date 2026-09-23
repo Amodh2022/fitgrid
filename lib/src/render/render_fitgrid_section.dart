@@ -22,6 +22,10 @@ typedef FitGridCellSpecResolver =
 /// Resolves a row's background, or null to use the theme's striping.
 typedef FitGridRowColorResolver = Color? Function(int rowIndex);
 
+/// Whether a row is selected. Used for semantics, where "selected" is a state
+/// a screen reader announces rather than merely a colour.
+typedef FitGridRowFlagResolver = bool Function(int rowIndex);
+
 /// Parent data for overlay children — the real widgets layered over the
 /// painted grid for cells that need interactivity or chrome.
 class FitGridCellParentData extends ContainerBoxParentData<RenderBox> {
@@ -41,7 +45,7 @@ class FitGridCellParentData extends ContainerBoxParentData<RenderBox> {
 /// single batched line draw for the grid rules. Widgets are spent only where
 /// they buy something.
 ///
-/// Three things keep that from degrading:
+/// Four things keep that from degrading:
 ///
 /// * **Windowing.** Only rows in `[firstVisibleRow, firstVisibleRow +
 ///   visibleRowCount)` and columns intersecting the horizontal viewport are
@@ -49,9 +53,19 @@ class FitGridCellParentData extends ContainerBoxParentData<RenderBox> {
 /// * **Painter caching.** A cell's `TextPainter` survives across paints and is
 ///   re-laid-out only when its spec or its column width changes. The cache is
 ///   pruned to the window, so it stays bounded by what is on screen.
-/// * **Batched rules.** Every divider in the section is one
+/// * **Batched rules.** Every divider in a band is one
 ///   `drawRawPoints(PointMode.lines)` over a reused `Float32List`, not a
 ///   `drawLine` per edge.
+/// * **Banded painting.** Pinned columns are not a second render object. They
+///   are index ranges at either end of the same layout, painted into their own
+///   clip after the scrolling band, which is why freezing a column costs a
+///   clip rather than a parallel widget tree.
+///
+/// Painted cells are invisible to the accessibility tree unless someone puts
+/// them there, so this render object assembles its own: a `table` node holding
+/// one `row` per visible row and one `cell` per visible cell. That is the price
+/// of painting rather than building, and it is paid here, once, instead of
+/// being left to the caller.
 class RenderFitGridSection extends RenderBox
     with
         ContainerRenderObjectMixin<RenderBox, FitGridCellParentData>,
@@ -69,9 +83,15 @@ class RenderFitGridSection extends RenderBox
     int overscanRows = 2,
     TextScaler textScaler = TextScaler.noScaling,
     FitGridRowColorResolver? rowColor,
+    FitGridRowFlagResolver? isRowSelected,
     bool striped = true,
     int editingRow = -1,
     int editingColumn = -1,
+    int focusedRow = -1,
+    int focusedColumn = -1,
+    int hoveredRow = -1,
+    int rowIndexOffset = 0,
+    void Function(int row, int column)? onCellActivate,
   }) : _columnLayout = columnLayout,
        _paintColumns = paintColumns,
        _cellSpec = cellSpec,
@@ -84,15 +104,21 @@ class RenderFitGridSection extends RenderBox
        _overscanRows = overscanRows,
        _textScaler = textScaler,
        _rowColor = rowColor,
+       _isRowSelected = isRowSelected,
        _striped = striped,
        _editingRow = editingRow,
-       _editingColumn = editingColumn;
+       _editingColumn = editingColumn,
+       _focusedRow = focusedRow,
+       _focusedColumn = focusedColumn,
+       _hoveredRow = hoveredRow,
+       _rowIndexOffset = rowIndexOffset,
+       _onCellActivate = onCellActivate;
 
   // ---------------------------------------------------------------- geometry
 
   FitGridColumnLayout _columnLayout;
 
-  /// Resolved widths and offsets of the visible columns.
+  /// Resolved widths, offsets and pinning of the visible columns.
   ///
   /// Not named `layout` because [RenderObject.layout] already owns that name,
   /// and shadowing it makes `section.layout(constraints)` silently resolve to a
@@ -105,6 +131,7 @@ class RenderFitGridSection extends RenderBox
     // stale.
     _clearCache();
     markNeedsLayout();
+    markNeedsSemanticsUpdate();
   }
 
   List<FitGridPaintColumn> _paintColumns;
@@ -114,6 +141,7 @@ class RenderFitGridSection extends RenderBox
     _paintColumns = value;
     _clearCache();
     markNeedsPaint();
+    markNeedsSemanticsUpdate();
   }
 
   FitGridRowMetrics _rowMetrics;
@@ -128,6 +156,7 @@ class RenderFitGridSection extends RenderBox
     if (identical(_rowMetrics, value) || _rowMetrics == value) return;
     _rowMetrics = value;
     markNeedsLayout();
+    markNeedsSemanticsUpdate();
   }
 
   int get rowCount => _rowMetrics.rowCount;
@@ -197,6 +226,19 @@ class RenderFitGridSection extends RenderBox
   /// Current vertical scroll position, in content pixels.
   double get verticalOffset => _verticalOffset;
 
+  /// Furthest the scrolling band can be scrolled horizontally.
+  double get maxHorizontalOffset =>
+      math.max(0.0, _columnLayout.scrollableWidth - _scrollableExtent);
+
+  /// Screen width left for the columns that actually scroll, once both pinned
+  /// bands have taken their share.
+  double get _scrollableExtent => math.max(
+    0.0,
+    size.width -
+        _columnLayout.leadingFrozenWidth -
+        _columnLayout.trailingFrozenWidth,
+  );
+
   // ----------------------------------------------------------------- content
 
   FitGridCellSpecResolver _cellSpec;
@@ -221,6 +263,7 @@ class RenderFitGridSection extends RenderBox
     _specVersion = value;
     _clearCache();
     markNeedsPaint();
+    markNeedsSemanticsUpdate();
   }
 
   FitGridThemeData _theme;
@@ -257,6 +300,13 @@ class RenderFitGridSection extends RenderBox
     markNeedsPaint();
   }
 
+  FitGridRowFlagResolver? _isRowSelected;
+  set isRowSelected(FitGridRowFlagResolver? value) {
+    if (_isRowSelected == value) return;
+    _isRowSelected = value;
+    markNeedsSemanticsUpdate();
+  }
+
   bool _striped;
   set striped(bool value) {
     if (_striped == value) return;
@@ -281,17 +331,64 @@ class RenderFitGridSection extends RenderBox
     markNeedsPaint();
   }
 
+  int _focusedRow;
+  int _focusedColumn;
+
+  /// The cell carrying the keyboard focus ring, or (-1, -1).
+  (int, int) get focusedCell => (_focusedRow, _focusedColumn);
+  set focusedCell((int, int) value) {
+    final (row, column) = value;
+    if (_focusedRow == row && _focusedColumn == column) return;
+    _focusedRow = row;
+    _focusedColumn = column;
+    markNeedsPaint();
+    markNeedsSemanticsUpdate();
+  }
+
+  int _hoveredRow;
+
+  /// The row under the pointer, or -1. Painted rather than built, for the same
+  /// reason everything else here is: a hover highlight should not cost a
+  /// `MouseRegion` per row.
+  int get hoveredRow => _hoveredRow;
+  set hoveredRow(int value) {
+    if (_hoveredRow == value) return;
+    _hoveredRow = value;
+    markNeedsPaint();
+  }
+
+  int _rowIndexOffset;
+
+  /// What to add to a local row index to get the index into the whole dataset.
+  /// Non-zero when the grid is paginated; used only for semantics labels, which
+  /// should say "row 603" rather than "row 3 of the page you happen to be on".
+  int get rowIndexOffset => _rowIndexOffset;
+  set rowIndexOffset(int value) {
+    if (_rowIndexOffset == value) return;
+    _rowIndexOffset = value;
+    markNeedsSemanticsUpdate();
+  }
+
+  void Function(int row, int column)? _onCellActivate;
+  set onCellActivate(void Function(int row, int column)? value) {
+    if (_onCellActivate == value) return;
+    final had = _onCellActivate != null;
+    _onCellActivate = value;
+    if (had != (value != null)) markNeedsSemanticsUpdate();
+  }
+
   // ------------------------------------------------------------ paint caches
 
   final Map<int, _CachedCell> _cells = <int, _CachedCell>{};
   Float32List? _rulePoints;
-  int _ruleCount = 0;
 
-  int _cellKey(int row, int column) => row * 1000003 + column;
+  static const int _columnStride = 1 << 20;
+
+  int _cellKey(int row, int column) => row * _columnStride + column;
 
   void _clearCache() {
     for (final cell in _cells.values) {
-      cell.painter.dispose();
+      cell.dispose();
     }
     _cells.clear();
   }
@@ -303,9 +400,9 @@ class RenderFitGridSection extends RenderBox
     final first = _firstVisibleRow;
     final last = _firstVisibleRow + _visibleRowCount;
     _cells.removeWhere((key, cell) {
-      final row = key ~/ 1000003;
+      final row = key ~/ _columnStride;
       if (row >= first && row < last) return false;
-      cell.painter.dispose();
+      cell.dispose();
       return true;
     });
   }
@@ -363,14 +460,19 @@ class RenderFitGridSection extends RenderBox
 
     // Content extents come from the row count and the resolved column widths,
     // so the scroll positions can be settled before any child does work.
+    //
+    // The horizontal extent is the *scrolling* band's, not the whole content's:
+    // pinned columns occupy screen width that the scroll never recovers, so
+    // measuring the scrollable range against the full viewport would let the
+    // user scroll past the last unpinned column by exactly the pinned width.
     final maxVertical = math.max(0.0, contentHeight - size.height);
-    final maxHorizontal = math.max(0.0, contentWidth - size.width);
+    final maxHorizontal = maxHorizontalOffset;
 
     _vertical
       ..applyViewportDimension(size.height)
       ..applyContentDimensions(0.0, maxVertical);
     _horizontal
-      ..applyViewportDimension(size.width)
+      ..applyViewportDimension(_scrollableExtent)
       ..applyContentDimensions(0.0, maxHorizontal);
 
     _verticalOffset = _vertical.hasPixels
@@ -391,6 +493,7 @@ class RenderFitGridSection extends RenderBox
       _firstVisibleRow = first;
       _visibleRowCount = span;
       _pruneCache();
+      markNeedsSemanticsUpdate();
     }
 
     // Overlay children are already scoped to the window by the widget layer;
@@ -418,7 +521,7 @@ class RenderFitGridSection extends RenderBox
           parentUsesSize: false,
         );
         data.offset = Offset(
-          _dx(columnIndex, width) - _horizontalOffset,
+          _screenLeft(columnIndex),
           (inRange ? _rowMetrics.offsetOf(rowIndex) : 0.0) - _verticalOffset,
         );
       }
@@ -426,17 +529,68 @@ class RenderFitGridSection extends RenderBox
     }
   }
 
-  /// Leading edge of a column in content space, honouring text direction.
+  // --------------------------------------------------------- band geometry
+
+  /// Distance from the *leading* edge of the viewport to a column's leading
+  /// edge, with pinning and scrolling already applied.
   ///
-  /// In RTL the visual order of columns is mirrored: the first column sits at
-  /// the right edge of the content. Doing that here, once, is what keeps every
-  /// other bit of geometry direction-agnostic.
-  double _dx(int columnIndex, double width) {
-    final start = _columnLayout.offsets[columnIndex];
-    return switch (_textDirection) {
-      TextDirection.ltr => start,
-      TextDirection.rtl => contentWidth - start - width,
-    };
+  /// Everything horizontal goes through here. Doing the three cases once, in
+  /// leading-edge space, is what keeps painting, hit testing, semantics and
+  /// overlay placement from each growing their own subtly different version of
+  /// the same arithmetic — and what makes RTL a single mirror at the end
+  /// rather than a special case in every one of them.
+  double _logicalStart(int columnIndex) {
+    final layout = _columnLayout;
+    if (columnIndex < layout.leadingFrozenCount) {
+      return layout.offsets[columnIndex];
+    }
+    if (columnIndex >= layout.trailingFrozenStart) {
+      return size.width - (layout.totalWidth - layout.offsets[columnIndex]);
+    }
+    return layout.offsets[columnIndex] - _horizontalOffset;
+  }
+
+  /// Left edge of a column in this box's own coordinates.
+  double _screenLeft(int columnIndex) {
+    final start = _logicalStart(columnIndex);
+    return _textDirection == TextDirection.ltr
+        ? start
+        : size.width - start - _columnLayout.widths[columnIndex];
+  }
+
+  /// A band, given its span in leading-edge space.
+  Rect _bandRect(double start, double end, Offset offset) {
+    if (_textDirection == TextDirection.ltr) {
+      return Rect.fromLTRB(
+        offset.dx + start,
+        offset.dy,
+        offset.dx + end,
+        offset.dy + size.height,
+      );
+    }
+    return Rect.fromLTRB(
+      offset.dx + size.width - end,
+      offset.dy,
+      offset.dx + size.width - start,
+      offset.dy + size.height,
+    );
+  }
+
+  /// Which scrolling columns intersect their band.
+  (int, int) get _visibleScrollableRange {
+    final layout = _columnLayout;
+    if (layout.trailingFrozenStart <= layout.leadingFrozenCount) return (0, 0);
+    final from = layout.leadingFrozenCount;
+    final to = layout.trailingFrozenStart;
+    final start = layout
+        .columnAtOffset(layout.offsets[from] + _horizontalOffset)
+        .clamp(from, to - 1);
+    final end = layout
+        .columnAtOffset(
+          layout.offsets[from] + _horizontalOffset + _scrollableExtent,
+        )
+        .clamp(from, to - 1);
+    return (start, math.min(end + 1, to));
   }
 
   // ----------------------------------------------------------------- paint
@@ -444,59 +598,121 @@ class RenderFitGridSection extends RenderBox
   @override
   void paint(PaintingContext context, Offset offset) {
     if (_columnLayout.isEmpty || rowCount == 0) return;
-    context.canvas.save();
-    context.canvas.clipRect(offset & size);
-    _paintRows(context.canvas, offset);
-    _paintRules(context.canvas, offset);
-    _paintText(context.canvas, offset);
-    context.canvas.restore();
+    final layout = _columnLayout;
+    final canvas = context.canvas;
+
+    canvas
+      ..save()
+      ..clipRect(offset & size);
+
+    // The scrolling band is painted first and clipped to its own strip, so the
+    // pinned bands laid over it never have to erase anything: the scrolling
+    // text simply never reaches underneath them.
+    final (firstScroll, lastScroll) = _visibleScrollableRange;
+    _paintBand(
+      canvas,
+      offset,
+      firstScroll,
+      lastScroll,
+      _bandRect(
+        layout.leadingFrozenWidth,
+        size.width - layout.trailingFrozenWidth,
+        offset,
+      ),
+    );
+
+    if (layout.leadingFrozenCount > 0) {
+      _paintBand(
+        canvas,
+        offset,
+        0,
+        layout.leadingFrozenCount,
+        _bandRect(0, layout.leadingFrozenWidth, offset),
+      );
+      _paintFrozenEdge(
+        canvas,
+        offset,
+        layout.leadingFrozenWidth,
+        leading: true,
+        active: _horizontalOffset > 0.5,
+      );
+    }
+    if (layout.trailingFrozenStart < layout.length) {
+      _paintBand(
+        canvas,
+        offset,
+        layout.trailingFrozenStart,
+        layout.length,
+        _bandRect(size.width - layout.trailingFrozenWidth, size.width, offset),
+      );
+      _paintFrozenEdge(
+        canvas,
+        offset,
+        size.width - layout.trailingFrozenWidth,
+        leading: false,
+        active: _horizontalOffset < maxHorizontalOffset - 0.5,
+      );
+    }
+
+    canvas.restore();
     defaultPaint(context, offset);
   }
 
-  /// Which visible columns intersect the horizontal viewport.
-  (int, int) get _visibleColumnRange {
-    if (_textDirection == TextDirection.rtl) {
-      // Mirrored: a scroll offset from the right maps to a window measured from
-      // the far end of content space.
-      final fromRight = _horizontalOffset;
-      final start = _columnLayout.columnAtOffset(
-        math.max(0, contentWidth - fromRight - size.width),
-      );
-      final end = _columnLayout.columnAtOffset(contentWidth - fromRight);
-      return (start, math.min(end + 1, _columnLayout.length));
-    }
-    final start = _columnLayout.columnAtOffset(_horizontalOffset);
-    final end = _columnLayout.columnAtOffset(_horizontalOffset + size.width);
-    return (start, math.min(end + 1, _columnLayout.length));
+  /// Backgrounds, rules and text for one contiguous range of columns, confined
+  /// to [band].
+  void _paintBand(
+    Canvas canvas,
+    Offset offset,
+    int firstColumn,
+    int lastColumn,
+    Rect band,
+  ) {
+    if (band.width <= 0) return;
+    canvas
+      ..save()
+      ..clipRect(band);
+    _paintRowBackgrounds(canvas, offset, band);
+    _paintRules(canvas, offset, band, firstColumn, lastColumn);
+    _paintText(canvas, offset, firstColumn, lastColumn);
+    _paintFocusRing(canvas, offset, firstColumn, lastColumn);
+    canvas.restore();
   }
 
-  void _paintRows(Canvas canvas, Offset offset) {
+  void _paintRowBackgrounds(Canvas canvas, Offset offset, Rect band) {
     final paint = Paint()..style = PaintingStyle.fill;
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
-      final color =
+      var color =
           _rowColor?.call(row) ??
           (_striped && row.isOdd
               ? _theme.alternateRowBackground
               : _theme.rowBackground);
+      if (row == _hoveredRow) {
+        color = Color.alphaBlend(_theme.hoverBackground, color);
+      }
       if (color.a == 0) continue;
       final top = offset.dy + _rowMetrics.offsetOf(row) - _verticalOffset;
       paint.color = color;
       canvas.drawRect(
-        Rect.fromLTWH(offset.dx, top, size.width, _rowMetrics.heightOf(row)),
+        Rect.fromLTWH(band.left, top, band.width, _rowMetrics.heightOf(row)),
         paint,
       );
     }
   }
 
-  /// Every rule in the section as one call.
+  /// Every rule in a band as one call.
   ///
   /// `drawRawPoints` with [PointMode.lines] consumes pairs of points, so the
   /// buffer holds x,y,x,y per segment. Reusing the `Float32List` across paints
   /// matters more than it looks: this runs on every frame of a scroll.
-  void _paintRules(Canvas canvas, Offset offset) {
-    final (firstColumn, lastColumn) = _visibleColumnRange;
+  void _paintRules(
+    Canvas canvas,
+    Offset offset,
+    Rect band,
+    int firstColumn,
+    int lastColumn,
+  ) {
     final rowRules = _lastVisibleRow - _firstVisibleRow;
-    final columnRules = math.max(0, lastColumn - firstColumn - 1);
+    final columnRules = math.max(0, lastColumn - firstColumn);
     final segments = rowRules + columnRules;
     if (segments == 0) return;
 
@@ -507,43 +723,90 @@ class RenderFitGridSection extends RenderBox
     }
 
     var i = 0;
-    final bottom = offset.dy + size.height;
-
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
       final y = offset.dy + _rowMetrics.offsetOf(row + 1) - _verticalOffset;
-      buffer[i++] = offset.dx;
+      buffer[i++] = band.left;
       buffer[i++] = y;
-      buffer[i++] = offset.dx + size.width;
+      buffer[i++] = band.right;
       buffer[i++] = y;
     }
 
-    for (var column = firstColumn; column < lastColumn - 1; column++) {
+    // The trailing rule of the last column in a band is drawn too, unless it is
+    // the very last column of the grid: it is the seam between the band and
+    // whatever sits beside it, and without it a pinned band floats.
+    for (var column = firstColumn; column < lastColumn; column++) {
+      if (column == _columnLayout.length - 1) continue;
       final width = _columnLayout.widths[column];
-      final x =
-          offset.dx +
-          _dx(column, width) -
-          _horizontalOffset +
-          (_textDirection == TextDirection.ltr ? width : 0.0);
+      final left = offset.dx + _screenLeft(column);
+      final x = _textDirection == TextDirection.ltr ? left + width : left;
       buffer[i++] = x;
-      buffer[i++] = offset.dy;
+      buffer[i++] = band.top;
       buffer[i++] = x;
-      buffer[i++] = bottom;
+      buffer[i++] = band.bottom;
     }
 
-    _ruleCount = i;
     canvas.drawRawPoints(
       PointMode.lines,
-      _ruleCount == buffer.length
-          ? buffer
-          : Float32List.sublistView(buffer, 0, _ruleCount),
+      i == buffer.length ? buffer : Float32List.sublistView(buffer, 0, i),
       Paint()
         ..color = _theme.rowDivider
         ..strokeWidth = _theme.dividerThickness,
     );
   }
 
-  void _paintText(Canvas canvas, Offset offset) {
-    final (firstColumn, lastColumn) = _visibleColumnRange;
+  /// The seam where a pinned band meets the scrolling one.
+  ///
+  /// Solid while the band is flush against the content, and given a short
+  /// gradient once the content has scrolled under it — the shadow is what says
+  /// "there is more over here", and showing it when there is not would be a
+  /// lie the user has to check.
+  void _paintFrozenEdge(
+    Canvas canvas,
+    Offset offset,
+    double logicalEdge, {
+    required bool leading,
+    required bool active,
+  }) {
+    final rtl = _textDirection == TextDirection.rtl;
+    final x = offset.dx + (rtl ? size.width - logicalEdge : logicalEdge);
+    canvas.drawLine(
+      Offset(x, offset.dy),
+      Offset(x, offset.dy + size.height),
+      Paint()
+        ..color = _theme.border
+        ..strokeWidth = _theme.dividerThickness,
+    );
+    if (!active) return;
+
+    // The shadow falls away from the pinned band, which under RTL is the other
+    // way along the x axis.
+    final outward = (leading != rtl) ? 1.0 : -1.0;
+    final shadow = Rect.fromLTRB(
+      math.min(x, x + outward * _theme.frozenShadowExtent),
+      offset.dy,
+      math.max(x, x + outward * _theme.frozenShadowExtent),
+      offset.dy + size.height,
+    );
+    canvas.drawRect(
+      shadow,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          outward > 0 ? shadow.centerLeft : shadow.centerRight,
+          outward > 0 ? shadow.centerRight : shadow.centerLeft,
+          <Color>[
+            _theme.frozenShadow,
+            _theme.frozenShadow.withValues(alpha: 0),
+          ],
+        ),
+    );
+  }
+
+  void _paintText(
+    Canvas canvas,
+    Offset offset,
+    int firstColumn,
+    int lastColumn,
+  ) {
     final padding = _theme.effectiveCellPadding;
 
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
@@ -561,18 +824,23 @@ class RenderFitGridSection extends RenderBox
         if (availableHeight <= 0) continue;
 
         final cell = _cellFor(row, column, available, availableHeight);
-        final left = offset.dx + _dx(column, width) - _horizontalOffset;
+        final left = offset.dx + _screenLeft(column);
 
-        final free = available - cell.painter.width;
+        final contentWidth = cell.painter.width + cell.iconAdvance;
+        final free = available - contentWidth;
         final inset = switch (_resolvedAlignment(column)) {
           FitGridAlignment.start => padding.left,
           FitGridAlignment.center => padding.left + math.max(0, free) / 2,
           FitGridAlignment.end => padding.left + math.max(0, free),
         };
+        final rtl = _textDirection == TextDirection.rtl;
+        final contentLeft = left + inset;
+        final textLeft = rtl ? contentLeft : contentLeft + cell.iconAdvance;
         final origin = Offset(
-          left + inset,
+          textLeft,
           top + (height - cell.painter.height) / 2,
         );
+        final cellRect = Rect.fromLTWH(left, top, width, height);
 
         final fading =
             _paintColumns[column].overflow == FitGridOverflow.fade &&
@@ -583,23 +851,55 @@ class RenderFitGridSection extends RenderBox
         // neighbours. The save/restore is skipped in the overwhelmingly common
         // case where the text already fits, because this runs per cell per
         // frame of a scroll.
-        if (fading) {
-          _paintFaded(
-            canvas,
-            cell,
-            origin,
-            Rect.fromLTWH(left, top, width, height),
-            padding.right,
-          );
-        } else if (cell.overflows) {
+        final needsClip = fading || cell.overflows;
+        if (needsClip && !fading) {
           canvas
             ..save()
-            ..clipRect(Rect.fromLTWH(left, top, width, height));
-          cell.painter.paint(canvas, origin);
-          canvas.restore();
+            ..clipRect(cellRect);
+        }
+
+        if (cell.icon != null) {
+          final iconLeft = rtl
+              ? contentLeft + contentWidth - cell.iconAdvance
+              : contentLeft;
+          cell.icon!.paint(
+            canvas,
+            Offset(iconLeft, top + (height - cell.icon!.height) / 2),
+          );
+        }
+
+        if (cell.hasHighlights) {
+          _paintHighlights(canvas, cell, origin);
+        }
+
+        if (fading) {
+          _paintFaded(canvas, cell, origin, cellRect, padding.right);
         } else {
           cell.painter.paint(canvas, origin);
+          if (needsClip) canvas.restore();
         }
+      }
+    }
+  }
+
+  /// A wash behind the characters a search matched.
+  ///
+  /// The boxes come from the painter that has already been laid out, so a
+  /// match highlight costs a rectangle per match and no second text layout —
+  /// the thing that makes highlighting expensive in a widget table, where the
+  /// text has to be rebuilt as a span tree to carry it.
+  void _paintHighlights(Canvas canvas, _CachedCell cell, Offset origin) {
+    final paint = Paint()..color = _theme.searchHighlight;
+    final highlights = cell.spec.highlights;
+    for (var i = 0; i + 1 < highlights.length; i += 2) {
+      final boxes = cell.painter.getBoxesForSelection(
+        TextSelection(
+          baseOffset: highlights[i],
+          extentOffset: highlights[i + 1],
+        ),
+      );
+      for (final box in boxes) {
+        canvas.drawRect(box.toRect().shift(origin), paint);
       }
     }
   }
@@ -647,6 +947,35 @@ class RenderFitGridSection extends RenderBox
       ..restore();
   }
 
+  /// The keyboard's current cell, outlined.
+  void _paintFocusRing(
+    Canvas canvas,
+    Offset offset,
+    int firstColumn,
+    int lastColumn,
+  ) {
+    final row = _focusedRow;
+    final column = _focusedColumn;
+    if (row < _firstVisibleRow || row >= _lastVisibleRow) return;
+    if (column < firstColumn || column >= lastColumn) return;
+
+    final width = _columnLayout.widths[column];
+    final rect = Rect.fromLTWH(
+      offset.dx + _screenLeft(column),
+      offset.dy + _rowMetrics.offsetOf(row) - _verticalOffset,
+      width,
+      _rowMetrics.heightOf(row),
+    );
+    final stroke = _theme.focusRingWidth;
+    canvas.drawRect(
+      rect.deflate(stroke / 2),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..color = _theme.focusOutline,
+    );
+  }
+
   /// Resolves a column's alignment against the text direction, so `start`
   /// means "leading edge" rather than "left".
   FitGridAlignment _resolvedAlignment(int column) {
@@ -679,6 +1008,33 @@ class RenderFitGridSection extends RenderBox
       return existing;
     }
 
+    // An icon is a glyph, so it is laid out by a painter of its own rather than
+    // reserved as blank space and drawn by hand. It also has to be measured
+    // before the text is, because what it takes is what the text does not get.
+    TextPainter? icon = existing?.icon;
+    var iconAdvance = 0.0;
+    if (spec.icon != null) {
+      final size = spec.iconSize ?? _theme.cellIconSize;
+      icon ??= TextPainter(textDirection: _textDirection);
+      icon
+        ..text = TextSpan(
+          text: String.fromCharCode(spec.icon!.codePoint),
+          style: TextStyle(
+            fontSize: size,
+            fontFamily: spec.icon!.fontFamily,
+            package: spec.icon!.fontPackage,
+            color: spec.iconColor ?? spec.style.color,
+            height: 1.0,
+          ),
+        )
+        ..textDirection = _textDirection
+        ..layout();
+      iconAdvance = icon.width + _theme.cellIconGap;
+    } else if (icon != null) {
+      icon.dispose();
+      icon = null;
+    }
+
     final painter =
         existing?.painter ?? TextPainter(textDirection: _textDirection);
     painter
@@ -706,25 +1062,159 @@ class RenderFitGridSection extends RenderBox
         ? affordable
         : math.min(spec.maxLines!, affordable);
 
+    final textWidth = math.max(0.0, maxWidth - iconAdvance);
     painter
       ..maxLines = lines
-      ..layout(maxWidth: maxWidth);
+      ..layout(maxWidth: textWidth);
 
     final cell = _CachedCell(
       painter: painter,
+      icon: icon,
+      iconAdvance: iconAdvance,
       spec: spec,
       maxWidth: maxWidth,
       maxHeight: maxHeight,
       truncated:
           painter.didExceedMaxLines ||
-          painter.maxIntrinsicWidth > maxWidth + 0.5,
+          painter.maxIntrinsicWidth > textWidth + 0.5,
       // Whole lines are all the budget above can trim. A single line taller
       // than the row it sits in has nowhere left to go, and gets clipped.
       overflows:
-          painter.height > maxHeight + 0.5 || painter.width > maxWidth + 0.5,
+          painter.height > maxHeight + 0.5 ||
+          painter.width + iconAdvance > maxWidth + 0.5,
     );
     _cells[key] = cell;
     return cell;
+  }
+
+  // ------------------------------------------------------------- semantics
+
+  final Map<int, SemanticsNode> _rowNodes = <int, SemanticsNode>{};
+  final Map<int, SemanticsNode> _cellNodes = <int, SemanticsNode>{};
+  SemanticsNode? _tableNode;
+
+  @override
+  void describeSemanticsConfiguration(SemanticsConfiguration config) {
+    super.describeSemanticsConfiguration(config);
+    config
+      ..isSemanticBoundary = true
+      ..explicitChildNodes = true;
+  }
+
+  /// Builds the accessibility tree the paint pass would otherwise have thrown
+  /// away.
+  ///
+  /// A widget table gets this for free and pays for it in widgets. Here it is
+  /// assembled from the same cell specs the painter reads, for the window only,
+  /// and the nodes are recycled across updates — so a screen reader sees a
+  /// proper table of rows and cells while the cost still tracks the viewport
+  /// rather than the dataset.
+  @override
+  void assembleSemanticsNode(
+    SemanticsNode node,
+    SemanticsConfiguration config,
+    Iterable<SemanticsNode> children,
+  ) {
+    final rows = <SemanticsNode>[];
+    final liveRowKeys = <int>{};
+    final liveCellKeys = <int>{};
+
+    final (firstScroll, lastScroll) = _visibleScrollableRange;
+    final layout = _columnLayout;
+
+    for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
+      final cells = <SemanticsNode>[];
+      final rowTop = _rowMetrics.offsetOf(row) - _verticalOffset;
+      final rowHeight = _rowMetrics.heightOf(row);
+
+      void addColumn(int column) {
+        final width = layout.widths[column];
+        final left = _screenLeft(column);
+        // A cell scrolled entirely out of its band is laid out but not
+        // announced: it is not on screen, and a screen reader that walks it
+        // would read the grid in an order the eye cannot follow.
+        if (left + width <= 0 || left >= size.width) return;
+
+        final key = _cellKey(row, column);
+        liveCellKeys.add(key);
+        final cellNode = _cellNodes.putIfAbsent(key, SemanticsNode.new);
+        final spec = _cellSpec(row, column);
+        final cellConfig = SemanticsConfiguration()
+          ..role = SemanticsRole.cell
+          ..isReadOnly = true
+          ..label = _semanticLabelFor(column, spec)
+          ..textDirection = _textDirection;
+        if (_onCellActivate != null) {
+          cellConfig.onTap = () => _onCellActivate!(row, column);
+        }
+        if (row == _focusedRow && column == _focusedColumn) {
+          cellConfig.isFocused = true;
+        }
+        cellNode
+          ..rect = Rect.fromLTWH(left, 0, width, rowHeight)
+          ..updateWith(config: cellConfig, childrenInInversePaintOrder: null);
+        cells.add(cellNode);
+      }
+
+      for (var c = 0; c < layout.leadingFrozenCount; c++) {
+        addColumn(c);
+      }
+      for (var c = firstScroll; c < lastScroll; c++) {
+        addColumn(c);
+      }
+      for (var c = layout.trailingFrozenStart; c < layout.length; c++) {
+        addColumn(c);
+      }
+      if (cells.isEmpty) continue;
+
+      liveRowKeys.add(row);
+      final rowNode = _rowNodes.putIfAbsent(row, SemanticsNode.new);
+      final rowConfig = SemanticsConfiguration()
+        ..role = SemanticsRole.row
+        ..isSelected = _isRowSelected?.call(row) ?? false
+        ..indexInParent = _rowIndexOffset + row
+        ..sortKey = OrdinalSortKey((_rowIndexOffset + row).toDouble());
+      rowNode
+        ..rect = Rect.fromLTWH(0, rowTop, size.width, rowHeight)
+        ..updateWith(config: rowConfig, childrenInInversePaintOrder: cells);
+      rows.add(rowNode);
+    }
+
+    _rowNodes.removeWhere((key, _) => !liveRowKeys.contains(key));
+    _cellNodes.removeWhere((key, _) => !liveCellKeys.contains(key));
+
+    // The rows hang off a node of their own rather than off this one. A node
+    // with the `table` role may only have rows beneath it, and an open editor
+    // is a real render object with real semantics that has to go somewhere —
+    // so the table is a child here, and the overlay children are its siblings.
+    final table = _tableNode ??= SemanticsNode();
+    table
+      ..rect = Offset.zero & size
+      ..updateWith(
+        config: SemanticsConfiguration()..role = SemanticsRole.table,
+        childrenInInversePaintOrder: rows,
+      );
+
+    node.updateWith(
+      config: config,
+      childrenInInversePaintOrder: <SemanticsNode>[table, ...children],
+    );
+  }
+
+  String _semanticLabelFor(int column, FitGridCellSpec spec) {
+    final value = spec.semanticLabel ?? spec.text;
+    final label = _paintColumns[column].label;
+    if (label.isEmpty) return value;
+    if (value.isEmpty) return '$label, blank';
+    return '$label, $value';
+  }
+
+  @override
+  void clearSemantics() {
+    super.clearSemantics();
+    _rowNodes.clear();
+    _cellNodes.clear();
+    _tableNode = null;
   }
 
   // -------------------------------------------------------------- utilities
@@ -739,13 +1229,69 @@ class RenderFitGridSection extends RenderBox
 
   /// The visible-column index at a horizontal offset in local coordinates, or
   /// -1 when outside the content.
+  ///
+  /// The pinned bands are tested first and in screen space, because that is
+  /// where they are: a pointer over a pinned column is nowhere near the content
+  /// offset the same x would mean in the scrolling band.
   int columnAtOffset(double dx) {
-    final contentX = _textDirection == TextDirection.ltr
-        ? dx + _horizontalOffset
-        : contentWidth - (dx + _horizontalOffset);
-    if (contentX < 0 || contentX >= contentWidth) return -1;
-    final index = _columnLayout.columnAtOffset(contentX);
-    return index >= _columnLayout.length ? -1 : index;
+    final layout = _columnLayout;
+    if (layout.isEmpty) return -1;
+    final logical = _textDirection == TextDirection.ltr ? dx : size.width - dx;
+    if (logical < 0 || logical > size.width) return -1;
+
+    if (logical < layout.leadingFrozenWidth) {
+      return layout.columnAtOffset(logical);
+    }
+    final trailingEdge = size.width - layout.trailingFrozenWidth;
+    if (layout.trailingFrozenStart < layout.length && logical >= trailingEdge) {
+      final index = layout.columnAtOffset(
+        layout.totalWidth - (size.width - logical),
+      );
+      return index >= layout.length ? layout.length - 1 : index;
+    }
+    return layout.scrollableColumnAtOffset(logical + _horizontalOffset);
+  }
+
+  /// The scroll offsets that would bring a cell fully into view, or null for an
+  /// axis that already shows it.
+  ///
+  /// Lives here because it is the only place that knows both the row geometry
+  /// and how much of the width the pinned bands have already taken — scrolling
+  /// a cell into view behind a pinned column is the bug this exists to avoid.
+  (double? vertical, double? horizontal) revealOffsetsFor(
+    int row,
+    int column, {
+    double padding = 0.0,
+  }) {
+    double? dy;
+    if (row >= 0 && row < rowCount) {
+      final top = _rowMetrics.offsetOf(row);
+      final bottom = top + _rowMetrics.heightOf(row);
+      if (top - padding < _verticalOffset) {
+        dy = math.max(0.0, top - padding);
+      } else if (bottom + padding > _verticalOffset + size.height) {
+        dy = math.min(
+          math.max(0.0, contentHeight - size.height),
+          bottom + padding - size.height,
+        );
+      }
+    }
+
+    double? dx;
+    final layout = _columnLayout;
+    if (column >= 0 && column < layout.length && layout.scrolls(column)) {
+      // Measured from the leading edge of the scrolling band, not the viewport,
+      // so a pinned column never gets to hide the cell we just scrolled to.
+      final bandStart = layout.offsets[layout.leadingFrozenCount];
+      final start = layout.offsets[column] - bandStart;
+      final end = start + layout.widths[column];
+      if (start - padding < _horizontalOffset) {
+        dx = math.max(0.0, start - padding);
+      } else if (end + padding > _horizontalOffset + _scrollableExtent) {
+        dx = math.min(maxHorizontalOffset, end + padding - _scrollableExtent);
+      }
+    }
+    return (dy, dx);
   }
 
   /// How many cell painters are currently held.
@@ -755,6 +1301,11 @@ class RenderFitGridSection extends RenderBox
   /// test asserting on it will fail the moment windowing or cache pruning
   /// regresses, which is the failure most likely to slip through unnoticed.
   int get paintedCellCount => _cells.length;
+
+  /// How many semantics nodes the accessibility tree currently holds. Observable
+  /// for the same reason [paintedCellCount] is: emitting a node per row of the
+  /// dataset would undo virtualization from the one direction nobody watches.
+  int get semanticsNodeCount => _rowNodes.length + _cellNodes.length;
 
   /// Whether a cell's text is currently ellipsized. Only meaningful for cells
   /// inside the window, since only those have been laid out.
@@ -772,6 +1323,9 @@ class RenderFitGridSection extends RenderBox
   /// The text painted into a cell. Used by `package:fitgrid/testing.dart`,
   /// which exists because painted text is invisible to `find.text`.
   String cellText(int row, int column) => _cellSpec(row, column).text;
+
+  /// The full spec behind a cell, for tests that need more than its text.
+  FitGridCellSpec cellSpecAt(int row, int column) => _cellSpec(row, column);
 
   @override
   bool hitTestSelf(Offset position) => true;
@@ -798,6 +1352,13 @@ class RenderFitGridSection extends RenderBox
       ..add(DoubleProperty('contentWidth', contentWidth))
       ..add(DoubleProperty('contentHeight', contentHeight))
       ..add(
+        IntProperty(
+          'frozenColumns',
+          _columnLayout.leadingFrozenCount,
+          defaultValue: 0,
+        ),
+      )
+      ..add(
         FlagProperty(
           'uniformRows',
           value: _rowMetrics.isUniform,
@@ -810,6 +1371,8 @@ class RenderFitGridSection extends RenderBox
 class _CachedCell {
   _CachedCell({
     required this.painter,
+    required this.icon,
+    required this.iconAdvance,
     required this.spec,
     required this.maxWidth,
     required this.maxHeight,
@@ -818,6 +1381,13 @@ class _CachedCell {
   });
 
   final TextPainter painter;
+
+  /// Laid-out glyph for [FitGridCellSpec.icon], or null.
+  final TextPainter? icon;
+
+  /// Horizontal space the icon and its gap take from the text.
+  final double iconAdvance;
+
   final FitGridCellSpec spec;
   final double maxWidth;
   final double maxHeight;
@@ -829,4 +1399,11 @@ class _CachedCell {
   /// Whether the laid-out text still exceeds its box and so has to be clipped
   /// at paint time.
   final bool overflows;
+
+  bool get hasHighlights => spec.hasHighlights;
+
+  void dispose() {
+    painter.dispose();
+    icon?.dispose();
+  }
 }

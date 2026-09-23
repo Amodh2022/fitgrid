@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../model/enums.dart';
 import '../model/fitgrid_column.dart';
+import '../sizing/column_order.dart';
 import 'fitgrid_editing.dart';
 import 'fitgrid_pagination.dart';
 
@@ -89,13 +90,16 @@ class FitGridColumnState<T> extends ChangeNotifier {
     : _columns = List<FitGridColumn<T>>.of(columns);
 
   List<FitGridColumn<T>> _columns;
+  List<FitGridColumn<T>>? _visible;
+  List<FitGridColumn<T>>? _unmodifiable;
   final Map<String, double> _widthOverrides = <String, double>{};
 
   List<FitGridColumn<T>> get columns =>
-      List<FitGridColumn<T>>.unmodifiable(_columns);
+      _unmodifiable ??= List<FitGridColumn<T>>.unmodifiable(_columns);
 
   set columns(List<FitGridColumn<T>> value) {
     _columns = List<FitGridColumn<T>>.of(value);
+    _invalidate();
     // Widths for columns that no longer exist would otherwise pin memory and
     // silently reapply if an id came back.
     _widthOverrides.removeWhere(
@@ -105,10 +109,21 @@ class FitGridColumnState<T> extends ChangeNotifier {
   }
 
   /// Visible columns in display order — what the sizer and renderer see.
-  List<FitGridColumn<T>> get visible => <FitGridColumn<T>>[
-    for (final c in _columns)
-      if (c.visible) c,
-  ];
+  ///
+  /// Pinned columns are pulled to the edges here rather than downstream, so
+  /// there is exactly one answer to "what is column 3" across the sizer, the
+  /// renderer, the header and the keyboard.
+  ///
+  /// Cached, and not defensively copied: this is read on every build of a
+  /// scrolling grid, and rebuilding it each time showed up before it was
+  /// anything else's problem.
+  List<FitGridColumn<T>> get visible => _visible ??=
+      List<FitGridColumn<T>>.unmodifiable(fitGridVisibleColumns(_columns));
+
+  void _invalidate() {
+    _visible = null;
+    _unmodifiable = null;
+  }
 
   /// Widths the user has dragged columns to, keyed by column id.
   Map<String, double> get widthOverrides =>
@@ -164,6 +179,7 @@ class FitGridColumnState<T> extends ChangeNotifier {
     final index = _columns.indexWhere((column) => column.id == id);
     if (index < 0 || _columns[index].visible == visible) return;
     _columns[index] = _columns[index].copyWith(visible: visible);
+    _invalidate();
     notifyListeners();
   }
 
@@ -172,6 +188,7 @@ class FitGridColumnState<T> extends ChangeNotifier {
     if (from == to || from < 0 || from >= _columns.length) return;
     final column = _columns.removeAt(from);
     _columns.insert(to.clamp(0, _columns.length), column);
+    _invalidate();
     notifyListeners();
   }
 }
