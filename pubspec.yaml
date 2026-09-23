@@ -2,7 +2,7 @@ name: fitgrid_table
 description: >-
   A Flutter data grid that measures your content instead of making you guess
   column widths, and paints cells instead of building a widget for each one.
-version: 0.1.0-dev
+version: 0.1.0
 repository: https://github.com/Amodh2022/fitgrid
 issue_tracker: https://github.com/Amodh2022/fitgrid/issues
 
@@ -15,11 +15,12 @@ topics:
 
 environment:
   sdk: ^3.9.0
-  flutter: ">=3.27.0"
+  flutter: ">=3.35.0"
 
-# Core has zero non-Flutter dependencies, on purpose. Heavy or opinionated
-# things (xlsx/pdf export, state management, localization) either live in a
-# companion package or are exposed as hooks for the host to wire up.
+# Core has zero non-Flutter dependencies, on purpose — xlsx export included,
+# which is written in pure Dart. Heavy or opinionated things (PDF, state
+# management, localization) either live in a companion package or are exposed
+# as hooks for the host to wire up.
 dependencies:
   flutter:
     sdk: flutter

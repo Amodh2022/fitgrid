@@ -380,12 +380,17 @@ final csv = fitGridToCsv(controller.export());
 final selection = fitGridToTsv(controller.export(selectedOnly: true));
 ```
 
-Export produces rows, not files. Writing an xlsx or a PDF means a zip writer, an
-XML schema and a font stack, and a grid that dragged all three into every
-application depending on it would be charging most of them for a feature they
-never call. `FitGridExportData` is the seam; the two text formats that actually
-move numbers between windows ship in the box, with RFC 4180 quoting, because
-skipping that is how an address column silently becomes three.
+```dart
+final Uint8List workbook = fitGridToXlsx(controller.export(), sheetName: 'Staff');
+```
+
+Export produces rows, and three writers turn them into files without adding a
+dependency: CSV and TSV with RFC 4180 quoting (skipping it is how an address
+column silently becomes three), and an Excel workbook written in pure Dart —
+stored zip entries, a bold frozen header, group outline levels, numbers as
+numbers except where that would drop a leading zero or precision. It runs on
+the web. A PDF, or a styled workbook, is a writer of your own over
+`FitGridExportData`.
 
 ## Pagination
 
@@ -403,6 +408,157 @@ controller.pagination.next();
 controller.pagination.revealRow(603);
 controller.scrollTo(603, columnId: 'salary'); // pages, then scrolls
 ```
+
+## Sorting by several columns
+
+Shift+click a second header and it becomes the tie-breaker; each sorted header
+shows its priority. The sort is stable, so rows equal on every key keep their
+order.
+
+```dart
+controller.setSort(const [
+  FitGridSortKey('department', FitGridSortDirection.ascending),
+  FitGridSortKey('salary', FitGridSortDirection.descending),
+]);
+```
+
+A data source receives every key in `FitGridPageRequest.sortKeys`; one written
+before multi-column sorting existed keeps working and sorts by the first.
+
+## The column menu, the chooser and filters
+
+```dart
+FitGrid<Employee>(
+  controller: controller,
+  showColumnMenu: true,           // sort, filter, pin, size to fit, hide, columns…
+  columns: [
+    FitGridColumn(id: 'role', label: 'Role', value: (e) => e.role,
+        filter: const FitGridFilterSpec.values()),          // a checklist
+    FitGridColumn(id: 'salary', label: 'Salary', value: (e) => e.salaryText,
+        filter: FitGridFilterSpec.number((e) => e.salary)), // greater than, between…
+    FitGridColumn(id: 'hired', label: 'Hired', value: (e) => e.hiredText,
+        filter: FitGridFilterSpec.date((e) => e.hired)),    // by calendar day
+  ],
+)
+
+FitGridColumnChooser<Employee>(controller: controller) // anywhere, e.g. a toolbar
+```
+
+Filters are data, not closures — `FitGridColumnFilter` — so they are shown back
+to the user when the dialog reopens, saved with the layout, and sent to a data
+source as JSON through `filterBy`. A filtered header shows a glyph.
+
+## Ranges, paste, fill and undo
+
+```dart
+FitGrid<Employee>(controller: controller, cellSelection: true)
+```
+
+Drag with the mouse, Shift+click or Shift+arrow to select a block of cells; it
+copies as a block. Ctrl+V pastes a block from its top-left cell, or fills the
+range with a single value. Delete clears it. The handle on the range's corner
+fills neighbouring cells — `1, 2` continues to `3, 4`, `Item 1` to `Item 2`,
+anything else repeats. Every value goes through the column's own validator and
+`onCommit`, exactly as a typed edit does; the grid never writes to a row.
+
+Ctrl+Z and Ctrl+Shift+Z undo and redo typed edits, pastes, clears and fills, a
+whole paste being one step. `controller.undo()` does the same from a button.
+
+## Header bands
+
+```dart
+FitGrid<Sale>(
+  columnGroups: const [
+    FitGridColumnGroup(id: 'q1', label: 'Q1', columnIds: ['jan', 'feb', 'mar']),
+  ],
+  ...
+)
+```
+
+A band follows its columns through a drag, and splits into one band per run
+when they are separated.
+
+## Detail rows
+
+```dart
+FitGrid<Order>(
+  rows: orders,
+  columns: columns,
+  rowKey: (o) => o.id,
+  detailBuilder: (context, order, index) => OrderLines(order),
+  detailRowHeight: 220,
+)
+```
+
+A chevron column opens a full-width panel under the row — any widget, built only
+while on screen. Open panels follow their row through a sort. They take no part
+in selection, copy or export.
+
+## Loading as the user scrolls
+
+```dart
+FitGrid<Item>(
+  rows: items,
+  columns: columns,
+  onLoadMore: () async {
+    final next = await api.next();
+    setState(() => items = [...items, ...next]);
+  },
+  hasMoreRows: api.hasMore,
+)
+```
+
+Called near the end, once at a time, with skeleton rows while it runs; a failure
+waits for the next scroll rather than retrying in a loop. Rows a data source is
+still fetching paint as the same skeletons.
+
+## Reordering rows
+
+`reorderableRows: true` adds drag handles, and Alt+Up / Alt+Down moves the
+focused row. The grid moves the row in the controller, or hands the move to
+`onRowReorder`. Selection and focus follow. It is off while sorted or grouped,
+when the order is not the rows' own.
+
+## Charts in cells
+
+```dart
+FitGridColumn<Stock>(
+  id: 'trend', label: 'Trend', value: (s) => s.closes.join(', '),
+  width: const FitGridColumnWidth.fixed(120),
+  visual: FitGridCellVisual.sparkline((s) => s.closes, filled: true),
+)
+```
+
+`.bar` draws data bars from the zero line (negatives the other way, in their own
+colour), `.progress` a filled track, `.sparkline` a line. They are painted by the
+text pass, so a column of ten thousand costs what ten thousand words do.
+
+## Pivots
+
+```dart
+final pivot = fitGridPivot<Sale>(
+  sales,
+  rows: [FitGridPivotDimension(id: 'region', label: 'Region', keyOf: (s) => s.region)],
+  columns: FitGridPivotDimension(id: 'q', label: 'Quarter', keyOf: (s) => s.quarter),
+  values: [FitGridPivotValue(id: 'revenue', label: 'Revenue', valueOf: (s) => s.amount)],
+);
+FitGrid<FitGridPivotRow>(rows: pivot.rows, columns: pivot.columns);
+```
+
+The result is an ordinary grid, so sorting, filtering and export work on it.
+Grand totals come from the source rows — an average is never an average of
+averages.
+
+## Remembering the layout
+
+```dart
+prefs.setString('grid', jsonEncode(controller.saveState().toJson()));
+controller.restoreState(FitGridSavedState.fromJson(jsonDecode(saved)));
+```
+
+Column order, visibility, pins, dragged widths, sort, filters, search and page.
+Restoring is forgiving: a removed column is skipped, and one added since keeps
+the place it was declared in.
 
 ## Testing
 
@@ -452,9 +608,16 @@ wrapping column's width so the wrap point is stable, and prefer
 - Frozen columns at either edge, with banded geometry shared by header and footer
 - Selection with modes, modifiers, a painted checkbox column and select-all
 - Full keyboard navigation, a focus ring, and TSV copy
-- Search with match highlighting, and per-column filters
-- Grouping, tree rows and merged cells over one flattening model
-- Aggregate footer, CSV/TSV export, context menus, column reordering
+- Search with match highlighting; typed column filters and value checklists
+- A column menu, a column chooser, and saved/restored layouts
+- Multi-column sort, with priorities in the headers
+- Cell ranges with block copy, paste, a fill handle, and undo/redo
+- Grouping (with sticky headers), tree rows, detail rows and merged cells
+- Header bands spanning column groups
+- Aggregate footer, CSV/TSV/xlsx export, context menus, column reordering
+- Row drag-to-reorder, infinite scroll with skeleton rows
+- Data bars, progress tracks and sparklines, painted
+- A pivot engine that produces an ordinary grid
 - Conditional row and cell formatting, painted rather than built
 - Real widgets in cells where you need them, virtualized like a sliver
 - Async data sources with a bounded page cache
@@ -468,8 +631,7 @@ wrapping column's width so the wrap point is stable, and prefer
 
 ## Roadmap
 
-- **v0.2** — undo/redo, drag-fill, multi-cell paste, column groups
-- **v0.3** — a companion package for xlsx and PDF export, and printing
+- **v0.2** — a drag-and-drop pivot designer, PDF export and printing
 - **v1.0** — responsive fallbacks, a docs site
 
 ## License
