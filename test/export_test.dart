@@ -1,4 +1,4 @@
-import 'package:fitgrid/fitgrid.dart';
+import 'package:fitgrid_table/fitgrid_table.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support.dart';

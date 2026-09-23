@@ -1,4 +1,4 @@
-import 'package:fitgrid/fitgrid.dart';
+import 'package:fitgrid_table/fitgrid_table.dart';
 import 'package:flutter/material.dart';
 
 /// A row type with one of each shape of value, so a test can exercise text,

@@ -11,8 +11,8 @@
 // that have nothing to do with the code, and a benchmark that cries wolf gets
 // ignored. It prints; read it.
 
-import 'package:fitgrid/fitgrid.dart';
-import 'package:fitgrid/testing.dart';
+import 'package:fitgrid_table/fitgrid_table.dart';
+import 'package:fitgrid_table/testing.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

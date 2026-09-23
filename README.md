@@ -14,6 +14,16 @@ column widths, and **paints cells** instead of building a widget for each one.
 Same viewport, a thousand times the data, the same amount of work. That is the
 whole argument, and `benchmark/` is where it is measured rather than asserted.
 
+## Install
+
+```sh
+flutter pub add fitgrid_table
+```
+
+```dart
+import 'package:fitgrid_table/fitgrid_table.dart';
+```
+
 ## Why another data grid
 
 Two things every Flutter table gets wrong, and this one doesn't.
@@ -244,6 +254,35 @@ costs a thousand `drawRect` calls rather than a thousand `Container`s. A
 selection wins where the two meet: a selection the user just made should not be
 hidden by a rule they wrote months ago.
 
+## Widgets in cells
+
+```dart
+FitGridColumn<Employee>(
+  id: 'actions',
+  label: 'Actions',
+  value: (e) => e.name,                          // search, copy, screen readers
+  width: const FitGridColumnWidth.fixed(120),    // widgets are not measured
+  cellBuilder: (context, e, rowIndex) => IconButton(
+    icon: const Icon(Icons.edit_outlined),
+    onPressed: () => edit(e),
+  ),
+)
+```
+
+Most columns should stay painted text. For the few that need a real widget, such
+as a button, a switch, an avatar or a status pill, `cellBuilder` builds one per
+cell. They are virtualized the way a sliver list is: built **during layout** for
+the rows on screen plus overscan, and dropped as they scroll away. A builder
+column over a million rows costs a screenful of widgets.
+
+Each widget gets its cell's box, inset by the theme's cell padding and aligned
+by the column's `alignment`. In a scrolled column it is clipped beneath a pinned
+column, as painted text is, and cannot be pressed through it. A widget that
+handles taps itself, like a button, keeps them, so the row is not selected as
+well. A passive widget, like a pill, lets the tap select the row. The column's
+`value` still drives search, sort, copy, export and what a screen reader reads
+for the cell.
+
 ## Overflow
 
 ```dart
@@ -372,7 +411,7 @@ to the approach, so the helpers ship in the box — and they have **no dependenc
 on `flutter_test`**, so they cost applications nothing:
 
 ```dart
-import 'package:fitgrid/testing.dart';
+import 'package:fitgrid_table/testing.dart';
 
 expect(fitGridCellText(row: 0, column: 1), 'Amit');
 expect(fitGridRowText(1), ['Bernadette', 'Designer', '£72,000']);
@@ -417,6 +456,7 @@ wrapping column's width so the wrap point is stable, and prefer
 - Grouping, tree rows and merged cells over one flattening model
 - Aggregate footer, CSV/TSV export, context menus, column reordering
 - Conditional row and cell formatting, painted rather than built
+- Real widgets in cells where you need them, virtualized like a sliver
 - Async data sources with a bounded page cache
 - Inline editing: one editor widget, validation, Enter/Escape/Tab
 - All four overflow policies, truncation-only tooltips

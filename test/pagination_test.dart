@@ -1,6 +1,6 @@
-import 'package:fitgrid/fitgrid.dart';
-import 'package:fitgrid/src/widgets/fitgrid_section.dart';
-import 'package:fitgrid/testing.dart';
+import 'package:fitgrid_table/fitgrid_table.dart';
+import 'package:fitgrid_table/src/widgets/fitgrid_section.dart';
+import 'package:fitgrid_table/testing.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

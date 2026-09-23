@@ -618,6 +618,36 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       theme: theme,
     );
 
+    // Widget cells: real widgets for the columns that asked for them, built by
+    // the section during layout for the rows on screen only. Each gets the
+    // same padding a painted cell does, so it lines up with the text beside it.
+    final widgetColumns = <int>[
+      for (var i = 0; i < columns.length; i++)
+        if (columns[i].cellBuilder != null) i,
+    ];
+    final cellPadding = theme.effectiveCellPadding;
+    Widget? buildCell(int localRow, int columnIndex) {
+      if (rowsView.isHeader(localRow)) return null;
+      final row = rowsView.rowAt(localRow);
+      if (row == null) return null;
+      final global = rowsView.globalIndex(localRow);
+      final column = columns[columnIndex];
+      final builder = column.cellBuilder!;
+      return Padding(
+        padding: cellPadding,
+        child: Align(
+          alignment: switch (column.alignment) {
+            FitGridAlignment.start => AlignmentDirectional.centerStart,
+            FitGridAlignment.center => AlignmentDirectional.center,
+            FitGridAlignment.end => AlignmentDirectional.centerEnd,
+          },
+          // A Builder, so the cell's own element is the context: a widget that
+          // reads Theme.of rebuilds itself, not the grid.
+          child: Builder(builder: (context) => builder(context, row, global)),
+        ),
+      );
+    }
+
     // The offsets only exist inside the viewport builders, so the section is a
     // closure rather than a value: everything above depends on the layout, and
     // the layout must be settled before the scrollables are built.
@@ -656,6 +686,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         rowsView,
         row,
       ),
+      cellBuilder: widgetColumns.isEmpty ? null : buildCell,
+      widgetColumns: widgetColumns,
       children: <Widget>[?editorChild],
     );
 
@@ -947,7 +979,13 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final render = _sectionKey.currentContext?.findRenderObject();
-      if (render is! RenderFitGridSection) return;
+      if (render is! RenderFitGridSection) {
+        // No section means no rows known yet: a source that starts at zero,
+        // or one a search has just reset. There is no window to report, but
+        // without asking for the first page it would never learn otherwise.
+        if (source.rowCount == 0) source.loadWindow(0, 0);
+        return;
+      }
       final first = render.firstVisibleRow;
       final last = math.min(
         render.firstVisibleRow + render.visibleRowCount,
@@ -1030,6 +1068,10 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     final hit = _cellAt(globalPosition, columns, rows);
     if (hit == null) return;
     final (localRow, columnIndex) = hit;
+    if (columns[columnIndex].cellBuilder != null &&
+        _cellWidgetClaims(globalPosition)) {
+      return;
+    }
 
     // A group header is a control, not a row: it opens and closes, and it
     // takes no part in the selection or in the tap callbacks.
@@ -1083,6 +1125,26 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   }
 
   /// The cell under a global position, or null.
+  /// Whether a widget cell under [globalPosition] listens for pointers itself
+  /// — a button, an InkWell, a checkbox — in which case the tap is its to
+  /// handle.
+  ///
+  /// The grid takes taps once, for the whole section, on tap-down. A button in
+  /// a cell competes for the same pointer, and without this a press held past
+  /// the tap timeout would both press the button and select the row. A passive
+  /// widget (an avatar, a pill) listens for nothing, so tapping it still
+  /// selects the row, the same as tapping painted text.
+  bool _cellWidgetClaims(Offset globalPosition) {
+    final render = _sectionKey.currentContext?.findRenderObject();
+    if (render is! RenderFitGridSection) return false;
+    final result = BoxHitTestResult();
+    render.hitTestChildren(
+      result,
+      position: render.globalToLocal(globalPosition),
+    );
+    return result.path.any((entry) => entry.target is RenderPointerListener);
+  }
+
   (int, int)? _cellAt(
     Offset globalPosition,
     List<FitGridColumn<T>> columns,

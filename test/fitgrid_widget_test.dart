@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fitgrid/fitgrid.dart';
-import 'package:fitgrid/src/widgets/fitgrid_section.dart';
-import 'package:fitgrid/testing.dart';
+import 'package:fitgrid_table/fitgrid_table.dart';
+import 'package:fitgrid_table/src/widgets/fitgrid_section.dart';
+import 'package:fitgrid_table/testing.dart';
 
 class Employee {
   const Employee(this.name, this.role, this.salary);
@@ -289,12 +289,12 @@ void main() {
       ),
     );
 
-    // Painted columns and reserved widget columns coexist: the builder column
-    // takes up its share of the width and is skipped by the text pass, while
-    // its neighbour still paints normally. Instantiating the builder itself
-    // comes with virtualized overlay children.
+    // Painted columns and widget columns coexist: the builder column takes up
+    // its share of the width and is skipped by the text pass, while its
+    // neighbour still paints normally.
     expect(fitGridCellText(row: 0, column: 0), 'Person 0');
     expect(fitGridColumnWidth('action'), greaterThan(0));
+    expect(find.byIcon(Icons.edit), findsNWidgets(3));
     expect(tester.takeException(), isNull);
   });
 

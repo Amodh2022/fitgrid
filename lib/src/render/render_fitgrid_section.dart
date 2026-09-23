@@ -221,6 +221,24 @@ class RenderFitGridSection extends RenderBox
     markNeedsLayout();
   }
 
+  /// Builds the widget cells for a window of rows, `[first, last)`.
+  ///
+  /// Set by the section's element. It runs inside [performLayout], through
+  /// [invokeLayoutCallback], because only layout knows which rows are on
+  /// screen: the grid scrolls by relaying this object out, not by rebuilding,
+  /// so a list of children decided in build would always be a frame behind.
+  void Function(int first, int last)? cellBuilder;
+
+  bool _cellsNeedBuild = true;
+  (int, int) _builtWindow = (-1, -1);
+
+  /// Asks for the widget cells to be rebuilt at the next layout, because what
+  /// they show may have changed even though the window has not.
+  void markCellsNeedBuild() {
+    _cellsNeedBuild = true;
+    markNeedsLayout();
+  }
+
   int _firstVisibleRow = 0;
 
   /// First row in the current window, including overscan.
@@ -564,8 +582,17 @@ class RenderFitGridSection extends RenderBox
       markNeedsSemanticsUpdate();
     }
 
-    // Overlay children are already scoped to the window by the widget layer;
-    // all that remains is to give each one its cell box.
+    final window = (_firstVisibleRow, _lastVisibleRow);
+    final build = cellBuilder;
+    if (build != null && (_cellsNeedBuild || window != _builtWindow)) {
+      _cellsNeedBuild = false;
+      _builtWindow = window;
+      invokeLayoutCallback<BoxConstraints>((_) => build(window.$1, window.$2));
+    }
+
+    // Overlay children are scoped to the window — widget cells by the builder
+    // above, the editor by the widget layer — so all that remains is to give
+    // each one its cell box.
     var child = firstChild;
     while (child != null) {
       final data = child.parentData! as FitGridCellParentData;
@@ -726,7 +753,79 @@ class RenderFitGridSection extends RenderBox
     _paintSpans(canvas, offset);
     canvas.restore();
     _pruneCache();
-    defaultPaint(context, offset);
+    _paintChildren(context, offset);
+  }
+
+  /// Which band a column is painted in: 0 leading pinned, 1 scrolling, 2
+  /// trailing pinned. Null for a stale column index.
+  int? _bandOf(int columnIndex) {
+    final layout = _columnLayout;
+    if (columnIndex < 0 || columnIndex >= layout.length) return null;
+    if (columnIndex < layout.leadingFrozenCount) return 0;
+    if (columnIndex >= layout.trailingFrozenStart) return 2;
+    return 1;
+  }
+
+  /// A band's strip in this box's own coordinates.
+  Rect _bandLocalRect(int band) {
+    final layout = _columnLayout;
+    return switch (band) {
+      0 => _bandRect(0, layout.leadingFrozenWidth, Offset.zero),
+      2 => _bandRect(
+        size.width - layout.trailingFrozenWidth,
+        size.width,
+        Offset.zero,
+      ),
+      _ => _bandRect(
+        layout.leadingFrozenWidth,
+        size.width - layout.trailingFrozenWidth,
+        Offset.zero,
+      ),
+    };
+  }
+
+  final List<LayerHandle<ClipRectLayer>> _bandClips =
+      List<LayerHandle<ClipRectLayer>>.generate(
+        3,
+        (_) => LayerHandle<ClipRectLayer>(),
+      );
+
+  /// Paints the overlay children, each clipped to the band its column lives
+  /// in — the same rule the painted text follows — so a widget scrolled under
+  /// a pinned column disappears beneath it instead of drawing over it, and a
+  /// row scrolled half off the top is cut at the edge.
+  ///
+  /// At most three clips per frame, one per band, however many children.
+  void _paintChildren(PaintingContext context, Offset offset) {
+    for (var band = 0; band < 3; band++) {
+      var any = false;
+      var child = firstChild;
+      while (child != null && !any) {
+        final data = child.parentData! as FitGridCellParentData;
+        any = _bandOf(data.columnIndex) == band;
+        child = data.nextSibling;
+      }
+      if (!any) {
+        _bandClips[band].layer = null;
+        continue;
+      }
+      _bandClips[band].layer = context.pushClipRect(
+        needsCompositing,
+        offset,
+        _bandLocalRect(band),
+        (context, offset) {
+          var child = firstChild;
+          while (child != null) {
+            final data = child.parentData! as FitGridCellParentData;
+            if (_bandOf(data.columnIndex) == band) {
+              context.paintChild(child, offset + data.offset);
+            }
+            child = data.nextSibling;
+          }
+        },
+        oldLayer: _bandClips[band].layer,
+      );
+    }
   }
 
   /// Backgrounds, rules and text for one contiguous range of columns, confined
@@ -1437,7 +1536,7 @@ class RenderFitGridSection extends RenderBox
   double? paintedTextHeight(int row, int column) =>
       _byCell[_cellKey(row, column)]?.painter.height;
 
-  /// The text painted into a cell. Used by `package:fitgrid/testing.dart`,
+  /// The text painted into a cell. Used by `package:fitgrid_table/testing.dart`,
   /// which exists because painted text is invisible to `find.text`.
   String cellText(int row, int column) => _cellSpec(row, column).text;
 
@@ -1472,19 +1571,41 @@ class RenderFitGridSection extends RenderBox
   }
 
   /// On-screen left edge of a column. Exposed for
-  /// `package:fitgrid/testing.dart`, where it is how a test proves a pinned
+  /// `package:fitgrid_table/testing.dart`, where it is how a test proves a pinned
   /// column stayed put while the rest scrolled.
   double debugColumnLeft(int columnIndex) => _screenLeft(columnIndex);
 
   @override
   bool hitTestSelf(Offset position) => true;
 
+  /// Hits only a child whose band contains the position, so a widget scrolled
+  /// under a pinned column cannot be pressed through it.
   @override
-  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
-      defaultHitTestChildren(result, position: position);
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    var child = lastChild;
+    while (child != null) {
+      final data = child.parentData! as FitGridCellParentData;
+      final band = _bandOf(data.columnIndex);
+      if (band != null && _bandLocalRect(band).contains(position)) {
+        final box = child;
+        final hit = result.addWithPaintOffset(
+          offset: data.offset,
+          position: position,
+          hitTest: (result, transformed) =>
+              box.hitTest(result, position: transformed),
+        );
+        if (hit) return true;
+      }
+      child = data.previousSibling;
+    }
+    return false;
+  }
 
   @override
   void dispose() {
+    for (final clip in _bandClips) {
+      clip.layer = null;
+    }
     _clearCache();
     super.dispose();
   }

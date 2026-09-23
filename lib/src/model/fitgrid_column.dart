@@ -9,16 +9,28 @@ typedef FitGridCellValue<T> = String Function(T row);
 
 /// Builds a real widget for one cell, instead of painted text.
 ///
-/// Cells with a builder are meant for the overlay layer — real render children
-/// sitting over the painted grid — so they cost what a widget costs. Use them
-/// for the handful of columns that need interactivity or chrome (status pills,
-/// avatars, buttons) and leave the rest as painted text.
+/// Cells with a builder are real widgets laid over the painted grid, so they
+/// cost what a widget costs. Use them for the handful of columns that need
+/// interactivity or chrome (buttons, status pills, avatars) and leave the rest
+/// as painted text.
 ///
-/// Not yet instantiated: the render layer already reserves these columns and
-/// skips them in the text pass, but building the widgets lazily as they scroll
-/// into view needs the same child-management contract a sliver has, and that
-/// lands with virtualized overlay children. Until then a builder column
-/// reserves its space and renders nothing.
+/// They are virtualized the way a sliver list is: built during layout for the
+/// rows on screen (plus overscan), and dropped as they scroll away, so a
+/// builder column over a million rows builds a screenful of widgets. Each one
+/// gets the cell's full box, inset by the theme's cell padding and aligned by
+/// the column's [FitGridColumn.alignment]. A widget in a scrolled column is
+/// clipped beneath a pinned one, like painted text.
+///
+/// The column's `value` still drives what the widget does not: search, sort
+/// order, copy, export, and what a screen reader reads for the cell. Give it
+/// a meaningful string.
+///
+/// A tap on a widget that handles pointers itself (a button, an InkWell) is
+/// the widget's. A tap on a passive one (an avatar, a pill) selects the row
+/// like any other cell.
+///
+/// Widget width is not measured. Give a builder column a
+/// [FitGridColumnWidth.fixed] or [FitGridColumnWidth.fitHeader] width.
 typedef FitGridCellBuilder<T> =
     Widget Function(BuildContext context, T row, int rowIndex);
 

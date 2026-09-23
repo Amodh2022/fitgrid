@@ -7,11 +7,19 @@ import '../sizing/column_layout.dart';
 import '../sizing/row_metrics.dart';
 import '../theme/fitgrid_theme.dart';
 
+/// Builds the widget for one cell, or null for none. Indices are into the
+/// section: rows local to the page, columns into the visible columns.
+typedef FitGridSectionCellBuilder = Widget? Function(int row, int column);
+
 /// Widget wrapper around [RenderFitGridSection].
 ///
-/// Children are overlay cells — the real widgets layered over the painted grid
-/// — and each must be tagged with a [FitGridCell] naming the cell it occupies.
-class FitGridSection extends MultiChildRenderObjectWidget {
+/// [children] are fixed overlay children — the editor — and each must be
+/// tagged with a [FitGridCell] naming the cell it occupies.
+///
+/// Widget cells are different: which of them exist depends on which rows are
+/// on screen, and only layout knows that, so they are built during layout by
+/// [cellBuilder] for the [widgetColumns] of every row in the window.
+class FitGridSection extends RenderObjectWidget {
   const FitGridSection({
     required this.columnLayout,
     required this.paintColumns,
@@ -32,9 +40,23 @@ class FitGridSection extends MultiChildRenderObjectWidget {
     this.cellSpan,
     this.rowIndent,
     this.onCellActivate,
-    super.children,
+    this.cellBuilder,
+    this.widgetColumns = const <int>[],
+    this.children = const <Widget>[],
     super.key,
   });
+
+  /// Fixed overlay children, each wrapped in a [FitGridCell].
+  final List<Widget> children;
+
+  /// Builds a widget cell. Null when no column has a builder.
+  final FitGridSectionCellBuilder? cellBuilder;
+
+  /// Indices of the columns [cellBuilder] is asked about.
+  final List<int> widgetColumns;
+
+  @override
+  RenderObjectElement createElement() => _FitGridSectionElement(this);
 
   final FitGridColumnLayout columnLayout;
   final List<FitGridPaintColumn> paintColumns;
@@ -166,4 +188,148 @@ class FitGridCell extends ParentDataWidget<FitGridCellParentData> {
 
   @override
   Type get debugTypicalAncestorWidgetClass => FitGridSection;
+}
+
+/// The slot every widget cell sits in. Cells are not ordered among themselves
+/// — they never overlap — so they share one slot and are appended after the
+/// fixed children.
+const Object _cellSlot = Object();
+
+/// Manages two kinds of children: the widget's fixed [FitGridSection.children],
+/// reconciled in build like any multi-child widget, and the widget cells,
+/// reconciled during layout against the rows the render object says are on
+/// screen — the same arrangement a sliver list uses, for the same reason.
+class _FitGridSectionElement extends RenderObjectElement {
+  _FitGridSectionElement(FitGridSection super.widget);
+
+  List<Element> _fixed = <Element>[];
+  final Set<Element> _forgottenFixed = <Element>{};
+  Map<(int, int), Element> _cells = <(int, int), Element>{};
+
+  FitGridSection get _section => widget as FitGridSection;
+
+  @override
+  RenderFitGridSection get renderObject =>
+      super.renderObject as RenderFitGridSection;
+
+  @override
+  void mount(Element? parent, Object? newSlot) {
+    super.mount(parent, newSlot);
+    Element? previous;
+    for (var i = 0; i < _section.children.length; i++) {
+      previous = inflateWidget(
+        _section.children[i],
+        IndexedSlot<Element?>(i, previous),
+      );
+      _fixed.add(previous);
+    }
+    _wireBuilder();
+  }
+
+  @override
+  void update(FitGridSection newWidget) {
+    super.update(newWidget);
+    _fixed = updateChildren(
+      _fixed,
+      newWidget.children,
+      forgottenChildren: _forgottenFixed,
+    );
+    _forgottenFixed.clear();
+    _wireBuilder();
+  }
+
+  /// Points the render object at this element's cell builder, and asks for the
+  /// cells to be rebuilt: a new widget means the rows, the columns or the
+  /// builders may have changed, even if the window has not.
+  void _wireBuilder() {
+    final render = renderObject;
+    if (_section.cellBuilder == null || _section.widgetColumns.isEmpty) {
+      render.cellBuilder = null;
+      // Nothing will ask again, so the cells go now rather than at a layout
+      // that will not build any.
+      if (_cells.isNotEmpty) {
+        for (final cell in _cells.values) {
+          updateChild(cell, null, _cellSlot);
+        }
+        _cells = <(int, int), Element>{};
+      }
+      return;
+    }
+    render
+      ..cellBuilder = _buildCells
+      ..markCellsNeedBuild();
+  }
+
+  /// Called by the render object, inside layout, with the rows now on screen.
+  void _buildCells(int first, int last) {
+    owner!.buildScope(this, () {
+      final build = _section.cellBuilder!;
+      final columns = _section.widgetColumns;
+      final next = <(int, int), Element>{};
+      for (var row = first; row < last; row++) {
+        for (final column in columns) {
+          final key = (row, column);
+          final built = build(row, column);
+          final element = updateChild(
+            _cells.remove(key),
+            built == null
+                ? null
+                : FitGridCell(rowIndex: row, columnIndex: column, child: built),
+            _cellSlot,
+          );
+          if (element != null) next[key] = element;
+        }
+      }
+      // Whatever is left scrolled out of the window.
+      for (final stale in _cells.values) {
+        updateChild(stale, null, _cellSlot);
+      }
+      _cells = next;
+    });
+  }
+
+  @override
+  void visitChildren(ElementVisitor visitor) {
+    for (final child in _fixed) {
+      if (!_forgottenFixed.contains(child)) visitor(child);
+    }
+    _cells.values.forEach(visitor);
+  }
+
+  @override
+  void forgetChild(Element child) {
+    final before = _cells.length;
+    _cells.removeWhere((_, cell) => identical(cell, child));
+    if (_cells.length == before) _forgottenFixed.add(child);
+    super.forgetChild(child);
+  }
+
+  @override
+  void insertRenderObjectChild(RenderBox child, Object? slot) {
+    if (slot is IndexedSlot<Element?>) {
+      // Fixed children stay at the front, in order.
+      renderObject.insert(child, after: slot.value?.renderObject as RenderBox?);
+    } else {
+      renderObject.insert(child, after: renderObject.lastChild);
+    }
+  }
+
+  @override
+  void moveRenderObjectChild(
+    RenderBox child,
+    Object? oldSlot,
+    Object? newSlot,
+  ) {
+    if (newSlot is IndexedSlot<Element?>) {
+      renderObject.move(
+        child,
+        after: newSlot.value?.renderObject as RenderBox?,
+      );
+    }
+  }
+
+  @override
+  void removeRenderObjectChild(RenderBox child, Object? slot) {
+    renderObject.remove(child);
+  }
 }

@@ -6,7 +6,7 @@
 /// control from [FitGridController].
 ///
 /// Cells are painted, not built, which means `find.text` will not see them in
-/// widget tests. Use `package:fitgrid/testing.dart` for that — it has no
+/// widget tests. Use `package:fitgrid_table/testing.dart` for that — it has no
 /// dependency on the test framework, so it costs applications nothing.
 library;
 

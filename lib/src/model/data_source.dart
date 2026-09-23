@@ -192,6 +192,15 @@ class FitGridAsyncDataSource<T> extends FitGridDataSource<T> {
   @override
   void refresh() => _invalidate();
 
+  @override
+  void dispose() {
+    // A fetch still in flight belongs to this generation. Moving past it makes
+    // the answer land as stale, so it is dropped rather than notifying a
+    // source nobody is listening to any more.
+    _generation++;
+    super.dispose();
+  }
+
   void _invalidate() {
     _generation++;
     _pages.clear();

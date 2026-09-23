@@ -63,6 +63,19 @@ ship this".
   `FitGrid.reorderableColumns`.
 - **Context menus**, a painted row hover, and `FitGrid.rowColor` for conditional
   formatting that costs a `drawRect` per row rather than a `Container`.
+- **Widget cells.** `FitGridColumn.cellBuilder` now renders: real widgets in
+  cells, built during layout for the rows on screen and dropped as they scroll
+  away, as a sliver list does. They are clipped to their band beneath pinned
+  columns and hit-tested within it. A widget that handles its own taps keeps
+  them rather than also selecting the row. Overlay children, the editor
+  included, are now clipped to their band as well.
+- A data source that starts with no known rows now loads. With the default
+  `initialRowCount: 0` the grid had nothing to lay out, so nothing reported a
+  window and the first page was never requested. A search, which resets the
+  count, stranded the grid the same way.
+- `FitGridAsyncDataSource.dispose` drops fetches still in flight, instead of
+  notifying from a disposed source when the answer lands after the screen that
+  owned it has gone.
 
 ### Performance
 
@@ -77,6 +90,9 @@ ship this".
 
 ### Packaging
 
+- Published on pub.dev as **`fitgrid_table`**. Import
+  `package:fitgrid_table/fitgrid_table.dart`, and `package:fitgrid_table/testing.dart`
+  for the test helpers.
 - **`flutter_test` is no longer a runtime dependency.** It was one because
   `testing.dart` took a `WidgetTester`; the helpers now find the grid themselves.
   They no longer take a `tester` argument, and `expectFitGridCell` /
@@ -86,6 +102,14 @@ ship this".
   dark, densities, all four overflow policies, RTL, frozen columns, grouping and
   search highlighting.
 
+### Example
+
+- The example app is now a gallery: two unrelated designs over the same data,
+  pagination three ways, conditional formatting, sizing with live frame timings,
+  lazy loading against a fake server, controller patterns with a rebuild
+  counter, grouping and tree rows, and the full playground. Each page explains
+  what to copy and what to avoid.
+
 ### Breaking
 
 - `FitGrid.selectionMode` is nullable and defaults to null, meaning "leave the
@@ -93,7 +117,7 @@ ship this".
   controller and silently cleared any selection set before the first build.
 - `FitGridCellStyle`, and the new `FitGridCellIcon` / `FitGridCellIconColor`,
   receive the row's index into the **full** row list rather than into the page.
-- `package:fitgrid/testing.dart` helpers no longer take a `WidgetTester`.
+- `package:fitgrid_table/testing.dart` helpers no longer take a `WidgetTester`.
 - `FitGridRowSizer.resolve` takes a `FitGridRowsView` rather than a `List`.
 
 ## 0.0.1-dev
@@ -134,4 +158,4 @@ Foundation release. Not published.
   `ChangeNotifier`s
 - `FitGridThemeData`, derivable from `ThemeData`, with three densities
 - Right-to-left support in measurement, layout and paint
-- `package:fitgrid/testing.dart` for asserting on painted cells
+- `package:fitgrid_table/testing.dart` for asserting on painted cells

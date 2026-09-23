@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fitgrid/fitgrid.dart';
-import 'package:fitgrid/testing.dart';
+import 'package:fitgrid_table/fitgrid_table.dart';
+import 'package:fitgrid_table/testing.dart';
 
 class _Row {
   const _Row(this.a, this.b);

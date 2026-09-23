@@ -1,5 +1,5 @@
-import 'package:fitgrid/fitgrid.dart';
-import 'package:fitgrid/testing.dart';
+import 'package:fitgrid_table/fitgrid_table.dart';
+import 'package:fitgrid_table/testing.dart';
 import 'package:flutter/material.dart';
 import 'dart:ui' show Tristate;
 

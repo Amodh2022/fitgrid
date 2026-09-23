@@ -1,5 +1,7 @@
-import 'package:fitgrid/fitgrid.dart';
-import 'package:fitgrid/testing.dart';
+import 'dart:async';
+
+import 'package:fitgrid_table/fitgrid_table.dart';
+import 'package:fitgrid_table/testing.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -178,5 +180,56 @@ void main() {
       ),
       throwsAssertionError,
     );
+  });
+
+  test('a fetch that lands after dispose is dropped quietly', () async {
+    final pending = Completer<FitGridPageResult<Employee>>();
+    final source = FitGridAsyncDataSource<Employee>(
+      pageSize: 10,
+      fetch: (_) => pending.future,
+    );
+    source.loadWindow(0, 9);
+    expect(source.isLoading, isTrue);
+
+    // The screen that owned the source is gone before the server answered.
+    source.dispose();
+    pending.complete(
+      const FitGridPageResult<Employee>(rows: <Employee>[], totalCount: 0),
+    );
+    // Would throw "used after being disposed" if the answer still notified.
+    await Future<void>.delayed(Duration.zero);
+  });
+
+  testWidgets('a source that starts with no known rows still loads', (
+    tester,
+  ) async {
+    // No initialRowCount: the grid has nothing to lay out, so nothing reports
+    // a window. It has to ask for the first page anyway.
+    final source = FitGridAsyncDataSource<Employee>(
+      pageSize: 20,
+      fetch: (request) async => FitGridPageResult<Employee>(
+        rows: <Employee>[
+          for (var i = request.offset; i < request.offset + 20; i++)
+            Employee('Person $i', 'Engineer', 50000 + i),
+        ],
+        totalCount: 300,
+      ),
+    );
+    addTearDown(source.dispose);
+
+    await tester.pumpWidget(
+      host(
+        FitGrid<Employee>(dataSource: source, columns: columns()),
+        size: const Size(800, 400),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(fitGridRowCount(), 300);
+    expect(fitGridCellText(row: 0, column: 0), 'Person 0');
+
+    // A search resets the count to zero, which is the same situation again.
+    source.search('person');
+    await tester.pumpAndSettle();
+    expect(fitGridRowCount(), 300);
   });
 }

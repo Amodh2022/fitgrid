@@ -10,9 +10,9 @@
 
 import 'dart:math' as math;
 
-import 'package:fitgrid/fitgrid.dart';
-import 'package:fitgrid/src/sizing/column_sizer.dart';
-import 'package:fitgrid/src/sizing/row_sizer.dart';
+import 'package:fitgrid_table/fitgrid_table.dart';
+import 'package:fitgrid_table/src/sizing/column_sizer.dart';
+import 'package:fitgrid_table/src/sizing/row_sizer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
