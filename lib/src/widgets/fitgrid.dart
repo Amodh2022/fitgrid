@@ -15,6 +15,7 @@ import '../model/fitgrid_editor.dart';
 import '../model/row_height.dart';
 import '../model/row_model.dart';
 import '../model/rows_view.dart';
+import '../model/sort_key.dart';
 import '../render/cell_spec.dart';
 import '../render/render_fitgrid_section.dart';
 import '../sizing/column_layout.dart';
@@ -23,6 +24,7 @@ import '../sizing/row_metrics.dart';
 import '../sizing/row_sizer.dart';
 import '../theme/fitgrid_theme.dart';
 import 'fitgrid_cell_editor.dart';
+import 'fitgrid_column_chooser.dart';
 import 'fitgrid_footer.dart';
 import 'fitgrid_header.dart';
 import 'fitgrid_intents.dart';
@@ -94,6 +96,8 @@ class FitGrid<T> extends StatefulWidget {
     this.resizableColumns = true,
     this.reorderableColumns = false,
     this.multiSort = true,
+    this.showColumnMenu = false,
+    this.columnMenuBuilder,
     this.paginated = false,
     this.pageSize,
     this.pagerBuilder,
@@ -193,6 +197,23 @@ class FitGrid<T> extends StatefulWidget {
   /// The controller can always sort by several columns — see
   /// [FitGridController.setSort] — this only governs the gesture.
   final bool multiSort;
+
+  /// Gives every header a menu button with the column's commands: sort,
+  /// filter, pin, size to fit, hide, and the column chooser.
+  ///
+  /// Off by default so an existing grid does not grow a button it was not
+  /// designed with.
+  final bool showColumnMenu;
+
+  /// Edits the column menu before it opens. Handed the built-in entries, so
+  /// adding one item is a one-liner and removing one is a `where`; return an
+  /// empty list to suppress the menu for that column.
+  final List<PopupMenuEntry<void>> Function(
+    BuildContext context,
+    FitGridColumn<T> column,
+    List<PopupMenuEntry<void>> defaults,
+  )?
+  columnMenuBuilder;
 
   /// Shows one page of rows at a time, with a pager below the grid.
   ///
@@ -755,6 +776,9 @@ class _FitGridState<T> extends State<FitGrid<T>> {
               onReorder: widget.reorderableColumns
                   ? controller.moveColumnBefore
                   : null,
+              onColumnMenu: widget.showColumnMenu
+                  ? (id, anchor) => _openColumnMenu(anchor, id)
+                  : null,
             ),
           ),
         Expanded(child: hoverable),
@@ -1020,6 +1044,130 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     // differently from page three.
     widget.dataSource?.sortByKeys(controller.data.sortKeys);
   }
+
+  /// The built-in column menu, anchored under the button that asked for it.
+  Future<void> _openColumnMenu(BuildContext anchor, String columnId) async {
+    final controller = _controller;
+    final column = controller.columns.byId(columnId);
+    if (column == null) return;
+    final theme = widget.theme ?? FitGridTheme.of(context);
+    final direction = controller.data.directionOf(columnId);
+    final visibleCount = controller.columns.visible.length;
+
+    PopupMenuItem<void> item(
+      String label,
+      IconData? icon,
+      VoidCallback? onTap,
+    ) => PopupMenuItem<void>(
+      enabled: onTap != null,
+      onTap: onTap,
+      child: Row(
+        children: <Widget>[
+          SizedBox(
+            width: 28,
+            child: icon == null ? null : Icon(icon, size: theme.sortIconSize),
+          ),
+          Flexible(child: Text(label)),
+        ],
+      ),
+    );
+
+    void sortTo(FitGridSortDirection to) {
+      controller.setSort(
+        to == FitGridSortDirection.none
+            ? const <FitGridSortKey>[]
+            : <FitGridSortKey>[FitGridSortKey(columnId, to)],
+      );
+      widget.dataSource?.sortByKeys(controller.data.sortKeys);
+    }
+
+    final defaults = <PopupMenuEntry<void>>[
+      if (column.sortable) ...<PopupMenuEntry<void>>[
+        item(
+          'Sort ascending',
+          theme.sortAscendingIcon,
+          direction == FitGridSortDirection.ascending
+              ? null
+              : () => sortTo(FitGridSortDirection.ascending),
+        ),
+        item(
+          'Sort descending',
+          theme.sortDescendingIcon,
+          direction == FitGridSortDirection.descending
+              ? null
+              : () => sortTo(FitGridSortDirection.descending),
+        ),
+        if (controller.data.sortKeys.isNotEmpty)
+          item('Clear sort', null, () => sortTo(FitGridSortDirection.none)),
+        const PopupMenuDivider(),
+      ],
+      ..._filterMenuItems(column, theme, item),
+      if (column.freeze != FitGridFreeze.start)
+        item(
+          'Pin to start',
+          null,
+          () => controller.columns.setFreeze(columnId, FitGridFreeze.start),
+        ),
+      if (column.freeze != FitGridFreeze.end)
+        item(
+          'Pin to end',
+          null,
+          () => controller.columns.setFreeze(columnId, FitGridFreeze.end),
+        ),
+      if (column.freeze != FitGridFreeze.none)
+        item(
+          'Unpin',
+          null,
+          () => controller.columns.setFreeze(columnId, FitGridFreeze.none),
+        ),
+      if (widget.resizableColumns && column.resizable)
+        item('Size to fit', null, () => controller.columns.autoSize(columnId)),
+      const PopupMenuDivider(),
+      if (column.hideable)
+        item(
+          'Hide column',
+          null,
+          visibleCount <= 1
+              ? null
+              : () => controller.columns.setVisible(columnId, false),
+        ),
+      item(
+        'Columns…',
+        Icons.view_column_outlined,
+        // After the menu has closed: a dialog pushed from inside a menu item's
+        // tap would be popped again by the menu's own route.
+        () => WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) showFitGridColumnDialog<T>(context, controller);
+        }),
+      ),
+    ];
+
+    final entries =
+        widget.columnMenuBuilder?.call(context, column, defaults) ?? defaults;
+    if (entries.isEmpty || !anchor.mounted) return;
+
+    final box = anchor.findRenderObject()! as RenderBox;
+    final overlay = Overlay.of(anchor).context.findRenderObject()! as RenderBox;
+    final origin = box.localToGlobal(
+      Offset(0, box.size.height),
+      ancestor: overlay,
+    );
+    await showMenu<void>(
+      context: anchor,
+      position: RelativeRect.fromRect(
+        origin & box.size,
+        Offset.zero & overlay.size,
+      ),
+      items: entries,
+    );
+  }
+
+  /// The column menu's filter entries. Empty until a column can be filtered.
+  List<PopupMenuEntry<void>> _filterMenuItems(
+    FitGridColumn<T> column,
+    FitGridThemeData theme,
+    PopupMenuItem<void> Function(String, IconData?, VoidCallback?) item,
+  ) => const <PopupMenuEntry<void>>[];
 
   // ------------------------------------------------------------- gestures
 
@@ -1804,6 +1952,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       textScaler,
       Object.hashAll(overrides.entries.map((e) => Object.hash(e.key, e.value))),
       widget.stretchColumnsToFill,
+      _headerExtra(theme),
     );
     final cached = _layout;
     if (cached != null && _layoutKey == key) return cached;
@@ -1817,6 +1966,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       textScaler: textScaler,
       overrides: overrides,
       stretchToFill: widget.stretchColumnsToFill,
+      headerExtra: _headerExtra(theme),
     );
     _layout = layout;
     // A measurement pass that ran out of budget leaves the widths provisional,
@@ -1830,6 +1980,10 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     }
     return layout;
   }
+
+  /// Header room every column needs beyond its label and sort icon.
+  double _headerExtra(FitGridThemeData theme) =>
+      widget.showColumnMenu ? theme.sortIconSize + 4 : 0.0;
 
   FitGridRowMetrics _resolveRowMetrics({
     required List<FitGridColumn<T>> columns,

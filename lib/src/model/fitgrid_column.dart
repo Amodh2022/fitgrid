@@ -74,6 +74,7 @@ class FitGridColumn<T> {
     this.maxLines = 1,
     this.freeze = FitGridFreeze.none,
     this.visible = true,
+    this.hideable = true,
     this.resizable = true,
     this.reorderable = true,
     this.sortable = false,
@@ -134,6 +135,11 @@ class FitGridColumn<T> {
   /// Whether the column is shown at all. Hidden columns keep their width and
   /// sort state, so toggling visibility is cheap and lossless.
   final bool visible;
+
+  /// Whether the column chooser and the column menu offer to hide this column.
+  /// Turn it off for the columns a row makes no sense without — an id, a name.
+  /// The controller can still hide it; this only governs the UI.
+  final bool hideable;
 
   /// Whether the user can drag this column's trailing divider to resize it,
   /// and double-click that divider to re-fit it to its content.
@@ -227,6 +233,7 @@ class FitGridColumn<T> {
     int? maxLines,
     FitGridFreeze? freeze,
     bool? visible,
+    bool? hideable,
     bool? resizable,
     bool? reorderable,
     bool? sortable,
@@ -255,6 +262,7 @@ class FitGridColumn<T> {
       maxLines: maxLines ?? this.maxLines,
       freeze: freeze ?? this.freeze,
       visible: visible ?? this.visible,
+      hideable: hideable ?? this.hideable,
       resizable: resizable ?? this.resizable,
       reorderable: reorderable ?? this.reorderable,
       sortable: sortable ?? this.sortable,

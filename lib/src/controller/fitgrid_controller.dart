@@ -263,6 +263,31 @@ class FitGridColumnState<T> extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Makes every column visible again.
+  void showAll() {
+    var changed = false;
+    for (var i = 0; i < _columns.length; i++) {
+      if (_columns[i].visible) continue;
+      _columns[i] = _columns[i].copyWith(visible: true);
+      changed = true;
+    }
+    if (!changed) return;
+    _invalidate();
+    notifyListeners();
+  }
+
+  /// Pins a column to an edge, or unpins it with [FitGridFreeze.none].
+  ///
+  /// The column keeps its place in the declared order, so unpinning puts it
+  /// back where it came from rather than leaving it at the edge.
+  void setFreeze(String id, FitGridFreeze freeze) {
+    final index = _columns.indexWhere((column) => column.id == id);
+    if (index < 0 || _columns[index].freeze == freeze) return;
+    _columns[index] = _columns[index].copyWith(freeze: freeze);
+    _invalidate();
+    notifyListeners();
+  }
+
   /// Moves a column within the display order.
   void move(int from, int to) {
     if (from == to || from < 0 || from >= _columns.length) return;

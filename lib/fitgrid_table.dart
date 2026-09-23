@@ -85,6 +85,11 @@ export 'src/sizing/row_metrics.dart'
     show FitGridMeasuredRowMetrics, FitGridRowMetrics, FitGridUniformRowMetrics;
 export 'src/theme/fitgrid_theme.dart' show FitGridTheme, FitGridThemeData;
 export 'src/widgets/fitgrid.dart' show FitGrid, FitGridContextMenuTarget;
+export 'src/widgets/fitgrid_column_chooser.dart'
+    show
+        FitGridColumnChooser,
+        fitGridColumnChooserItems,
+        showFitGridColumnDialog;
 export 'src/widgets/fitgrid_footer.dart' show FitGridFooter;
 export 'src/widgets/fitgrid_header.dart' show FitGridHeader;
 export 'src/widgets/fitgrid_intents.dart'

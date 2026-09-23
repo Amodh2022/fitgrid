@@ -35,6 +35,8 @@ class FitGridHeader<T> extends StatelessWidget {
     this.onResize,
     this.onAutoSize,
     this.onReorder,
+    this.onColumnMenu,
+    this.activeFilters = const <String>{},
     super.key,
   });
 
@@ -79,6 +81,13 @@ class FitGridHeader<T> extends StatelessWidget {
   /// Called when a header cell is dragged onto another, with the two column
   /// ids. Null leaves columns where they were declared.
   final void Function(String movedId, String targetId)? onReorder;
+
+  /// Opens the column menu for a column. Given the context of the button that
+  /// asked, so the menu can be anchored to it. Null shows no menu button.
+  final void Function(String columnId, BuildContext anchor)? onColumnMenu;
+
+  /// Ids of the columns carrying a filter, whose headers show a filter glyph.
+  final Set<String> activeFilters;
 
   @override
   Widget build(BuildContext context) {
@@ -244,6 +253,13 @@ class _Band<T> extends StatelessWidget {
                   ? () => header.onSort!(header.columns[i].id)
                   : null,
               onReorder: header.onReorder,
+              onMenu:
+                  header.onColumnMenu == null ||
+                      header.columns[i].id.startsWith('__fitgrid')
+                  ? null
+                  : (anchor) =>
+                        header.onColumnMenu!(header.columns[i].id, anchor),
+              filtered: header.activeFilters.contains(header.columns[i].id),
             ),
           ),
         // The handles are a sibling layer rather than children of the cells: a
@@ -385,6 +401,8 @@ class _HeaderCell<T> extends StatelessWidget {
     required this.onTap,
     required this.onReorder,
     this.sortPriority = -1,
+    this.onMenu,
+    this.filtered = false,
   });
 
   final FitGridColumn<T> column;
@@ -395,6 +413,12 @@ class _HeaderCell<T> extends StatelessWidget {
 
   /// Zero-based rank in a multi-column sort, or -1 to show none.
   final int sortPriority;
+
+  /// Opens this column's menu, anchored to the given context.
+  final void Function(BuildContext anchor)? onMenu;
+
+  /// Whether a filter is narrowing this column, which earns a glyph.
+  final bool filtered;
   final VoidCallback? onTap;
   final void Function(String movedId, String targetId)? onReorder;
 
@@ -425,12 +449,21 @@ class _HeaderCell<T> extends StatelessWidget {
     // width left by the time the padding has taken its share.
     Widget content = LayoutBuilder(
       builder: (context, constraints) {
-        final badge = sortPriority >= 0 ? theme.sortIconSize * 0.7 : 0.0;
-        final affordance = theme.sortIconSize + _sortGap + badge;
-        final showSort =
-            column.sortable &&
-            constraints.maxWidth >= affordance + _minLabelWidth;
-
+        // The menu button and the filter glyph are claimed before the sort
+        // icon: the menu is the only way to reach hiding, pinning and
+        // filtering, whereas sorting also answers to a tap on the label. The
+        // priority badge goes first of all, since the arrow alone still says
+        // which way the column runs.
+        final extra = theme.sortIconSize + _sortGap;
+        var room = constraints.maxWidth - _minLabelWidth;
+        final showMenu = onMenu != null && room >= extra;
+        if (showMenu) room -= extra;
+        final showFilter = filtered && room >= extra;
+        if (showFilter) room -= extra;
+        final showSort = column.sortable && room >= extra;
+        if (showSort) room -= extra;
+        final badge = theme.sortIconSize * 0.7;
+        final showBadge = showSort && sortPriority >= 0 && room >= badge;
         return Row(
           mainAxisAlignment: alignment,
           children: [
@@ -457,7 +490,7 @@ class _HeaderCell<T> extends StatelessWidget {
                     ? theme.sortIconColor.withValues(alpha: 0.35)
                     : theme.sortIconColor,
               ),
-              if (sortPriority >= 0)
+              if (showBadge)
                 SizedBox(
                   width: badge,
                   child: Text(
@@ -470,6 +503,36 @@ class _HeaderCell<T> extends StatelessWidget {
                     overflow: TextOverflow.clip,
                   ),
                 ),
+            ],
+            if (showFilter) ...[
+              const SizedBox(width: _sortGap),
+              Icon(
+                theme.filterActiveIcon,
+                size: theme.sortIconSize,
+                color: theme.focusOutline,
+              ),
+            ],
+            if (showMenu) ...[
+              const SizedBox(width: _sortGap),
+              Builder(
+                builder: (anchor) => Semantics(
+                  // Its own node, or on a column that is not sortable — whose
+                  // header has no button of its own to stop the merge — the
+                  // label folds into the header's and the button vanishes.
+                  container: true,
+                  button: true,
+                  label: '${column.label} column menu',
+                  child: InkResponse(
+                    radius: theme.sortIconSize,
+                    onTap: () => onMenu!(anchor),
+                    child: Icon(
+                      theme.columnMenuIcon,
+                      size: theme.sortIconSize,
+                      color: theme.sortIconColor.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ],
         );
