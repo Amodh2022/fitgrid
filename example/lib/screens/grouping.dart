@@ -117,6 +117,12 @@ class _GroupingScreenState extends State<GroupingScreen> {
           'group header is one painted cell spanning the row, and a collapsed '
           'group costs its header and nothing else.',
         ),
+        DemoNote(
+          'Scroll through a group: its header stays pinned at the top, the '
+          'department above the role when grouped twice, until the next '
+          'group pushes it away. Tap a pinned header to collapse its group. '
+          'Turn it off with stickyGroupHeaders: false.',
+        ),
         DemoNote.recommended(
           'Group through the controller. The rows stay one flat list, and you '
           'never build a nested structure yourself.',

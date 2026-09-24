@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 
+import 'cell_visual.dart';
+import 'column_filter.dart';
 import 'column_width.dart';
 import 'enums.dart';
 import 'fitgrid_editor.dart';
@@ -74,6 +76,7 @@ class FitGridColumn<T> {
     this.maxLines = 1,
     this.freeze = FitGridFreeze.none,
     this.visible = true,
+    this.hideable = true,
     this.resizable = true,
     this.reorderable = true,
     this.sortable = false,
@@ -90,6 +93,8 @@ class FitGridColumn<T> {
     this.cellStyle,
     this.tooltip,
     this.editor,
+    this.filter,
+    this.visual,
   }) : assert(maxLines == null || maxLines > 0, 'maxLines must be positive');
 
   /// Stable identity for this column. Used as the key for widths, sort state,
@@ -134,6 +139,11 @@ class FitGridColumn<T> {
   /// Whether the column is shown at all. Hidden columns keep their width and
   /// sort state, so toggling visibility is cheap and lossless.
   final bool visible;
+
+  /// Whether the column chooser and the column menu offer to hide this column.
+  /// Turn it off for the columns a row makes no sense without — an id, a name.
+  /// The controller can still hide it; this only governs the UI.
+  final bool hideable;
 
   /// Whether the user can drag this column's trailing divider to resize it,
   /// and double-click that divider to re-fit it to its content.
@@ -199,6 +209,17 @@ class FitGridColumn<T> {
   /// open — see [FitGridEditor].
   final FitGridEditor<T>? editor;
 
+  /// Makes this column filterable from its column menu, and says what kind of
+  /// value it filters on. Null leaves it out of the filter UI — though a
+  /// predicate set through `FitGridFilterState.setColumnFilter` still applies.
+  final FitGridFilterSpec<T>? filter;
+
+  /// A chart painted into each cell: a data bar, a progress track or a
+  /// sparkline. See [FitGridCellVisual].
+  ///
+  /// Charts are not measured, so give a sparkline column a fixed width.
+  final FitGridCellVisual<T>? visual;
+
   /// Whether a cell in this column can be opened for editing.
   bool get isEditable => editor != null;
 
@@ -227,6 +248,7 @@ class FitGridColumn<T> {
     int? maxLines,
     FitGridFreeze? freeze,
     bool? visible,
+    bool? hideable,
     bool? resizable,
     bool? reorderable,
     bool? sortable,
@@ -243,6 +265,8 @@ class FitGridColumn<T> {
     FitGridCellStyle<T>? cellStyle,
     String? tooltip,
     FitGridEditor<T>? editor,
+    FitGridFilterSpec<T>? filter,
+    FitGridCellVisual<T>? visual,
   }) {
     return FitGridColumn<T>(
       id: id ?? this.id,
@@ -255,6 +279,7 @@ class FitGridColumn<T> {
       maxLines: maxLines ?? this.maxLines,
       freeze: freeze ?? this.freeze,
       visible: visible ?? this.visible,
+      hideable: hideable ?? this.hideable,
       resizable: resizable ?? this.resizable,
       reorderable: reorderable ?? this.reorderable,
       sortable: sortable ?? this.sortable,
@@ -271,6 +296,8 @@ class FitGridColumn<T> {
       cellStyle: cellStyle ?? this.cellStyle,
       tooltip: tooltip ?? this.tooltip,
       editor: editor ?? this.editor,
+      filter: filter ?? this.filter,
+      visual: visual ?? this.visual,
     );
   }
 

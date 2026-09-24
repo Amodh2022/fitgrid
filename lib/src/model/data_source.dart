@@ -1,8 +1,10 @@
 import 'dart:collection';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
 import 'enums.dart';
+import 'sort_key.dart';
 
 /// What the grid asks a [FitGridAsyncDataSource] for.
 @immutable
@@ -12,7 +14,9 @@ class FitGridPageRequest {
     required this.limit,
     this.sortColumnId,
     this.sortDirection = FitGridSortDirection.none,
+    this.sortKeys = const <FitGridSortKey>[],
     this.query = '',
+    this.filters = const <String, Object?>{},
   });
 
   /// Index of the first row wanted, into the full result set.
@@ -27,6 +31,16 @@ class FitGridPageRequest {
   final String? sortColumnId;
   final FitGridSortDirection sortDirection;
 
+  /// Every sort key, highest priority first. [sortColumnId] and
+  /// [sortDirection] are the first of these, kept for backends that only ever
+  /// sort by one column.
+  final List<FitGridSortKey> sortKeys;
+
+  /// The structured column filters the user has set, keyed by column id — see
+  /// `FitGridColumnFilter`. Values are that type's `toJson()` maps, so a
+  /// backend can translate them into a query without importing Flutter.
+  final Map<String, Object?> filters;
+
   /// The active search text, or empty.
   final String query;
 
@@ -38,11 +52,20 @@ class FitGridPageRequest {
           other.limit == limit &&
           other.sortColumnId == sortColumnId &&
           other.sortDirection == sortDirection &&
-          other.query == query;
+          listEquals(other.sortKeys, sortKeys) &&
+          other.query == query &&
+          jsonEncode(other.filters) == jsonEncode(filters);
 
   @override
-  int get hashCode =>
-      Object.hash(offset, limit, sortColumnId, sortDirection, query);
+  int get hashCode => Object.hash(
+    offset,
+    limit,
+    sortColumnId,
+    sortDirection,
+    Object.hashAll(sortKeys),
+    query,
+    Object.hashAll(filters.keys),
+  );
 
   @override
   String toString() => 'FitGridPageRequest($offset..${offset + limit})';
@@ -85,6 +108,19 @@ abstract class FitGridDataSource<T> extends ChangeNotifier {
   /// Passes the grid's sort on. A source that sorts on the server should drop
   /// its cache and refetch.
   void sortBy(String? columnId, FitGridSortDirection direction) {}
+
+  /// Passes a multi-column sort on, highest priority first.
+  ///
+  /// The default forwards the primary key to [sortBy], so a source written
+  /// before multi-column sorting existed keeps working and simply sorts by the
+  /// first column. Override it to honour the rest.
+  void sortByKeys(List<FitGridSortKey> keys) => keys.isEmpty
+      ? sortBy(null, FitGridSortDirection.none)
+      : sortBy(keys.first.columnId, keys.first.direction);
+
+  /// Passes the grid's structured column filters on, as `toJson()` maps keyed
+  /// by column id. Empty means nothing is filtered.
+  void filterBy(Map<String, Object?> filters) {}
 
   /// Passes the grid's search text on.
   void search(String query) {}
@@ -132,9 +168,9 @@ class FitGridAsyncDataSource<T> extends FitGridDataSource<T> {
   int _rowCount;
   int _generation = 0;
   Object? _error;
-  String? _sortColumnId;
-  FitGridSortDirection _sortDirection = FitGridSortDirection.none;
+  List<FitGridSortKey> _sortKeys = const <FitGridSortKey>[];
   String _query = '';
+  Map<String, Object?> _filters = const <String, Object?>{};
 
   @override
   int get rowCount => _rowCount;
@@ -171,10 +207,28 @@ class FitGridAsyncDataSource<T> extends FitGridDataSource<T> {
   }
 
   @override
-  void sortBy(String? columnId, FitGridSortDirection direction) {
-    if (_sortColumnId == columnId && _sortDirection == direction) return;
-    _sortColumnId = columnId;
-    _sortDirection = direction;
+  void sortBy(String? columnId, FitGridSortDirection direction) => sortByKeys(
+    columnId == null || direction == FitGridSortDirection.none
+        ? const <FitGridSortKey>[]
+        : <FitGridSortKey>[FitGridSortKey(columnId, direction)],
+  );
+
+  @override
+  void sortByKeys(List<FitGridSortKey> keys) {
+    if (listEquals(_sortKeys, keys)) return;
+    _sortKeys = List<FitGridSortKey>.unmodifiable(keys);
+    _invalidate();
+  }
+
+  @override
+  void filterBy(Map<String, Object?> filters) {
+    // Compared as JSON: the values are nested maps, which `mapEquals` compares
+    // by identity, so every call would otherwise look like a new filter and
+    // throw the cache away.
+    if (jsonEncode(_filters) == jsonEncode(filters)) return;
+    _filters = Map<String, Object?>.unmodifiable(filters);
+    // Like a search, a filter changes the result set, so the count goes too.
+    _rowCount = 0;
     _invalidate();
   }
 
@@ -238,9 +292,13 @@ class FitGridAsyncDataSource<T> extends FitGridDataSource<T> {
           FitGridPageRequest(
             offset: page * pageSize,
             limit: pageSize,
-            sortColumnId: _sortColumnId,
-            sortDirection: _sortDirection,
+            sortColumnId: _sortKeys.isEmpty ? null : _sortKeys.first.columnId,
+            sortDirection: _sortKeys.isEmpty
+                ? FitGridSortDirection.none
+                : _sortKeys.first.direction,
+            sortKeys: _sortKeys,
             query: _query,
+            filters: _filters,
           ),
         )
         .then((result) {

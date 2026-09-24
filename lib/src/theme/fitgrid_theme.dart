@@ -62,6 +62,16 @@ class FitGridThemeData {
     this.cellPadding,
     this.headerHeight,
     this.rowHeight,
+    this.columnMenuIcon = Icons.more_vert_rounded,
+    this.filterIcon = Icons.filter_alt_outlined,
+    this.filterActiveIcon = Icons.filter_alt_rounded,
+    this.rowDragHandleIcon = Icons.drag_indicator,
+    this.rangeSelectionBackground,
+    this.chartColor,
+    this.chartNegativeColor,
+    this.detailBackground,
+    this.fillHandleSize = 7.0,
+    this.rowDragHandleWidth = 32.0,
   });
 
   /// A grid theme derived from the ambient Material theme. This is what a user
@@ -253,6 +263,39 @@ class FitGridThemeData {
   final double? headerHeight;
   final double? rowHeight;
 
+  /// Glyph of the button that opens a column's menu.
+  final IconData columnMenuIcon;
+
+  /// Glyph for the "Filter…" item of the column menu.
+  final IconData filterIcon;
+
+  /// Glyph shown in the header of a column that is being filtered.
+  final IconData filterActiveIcon;
+
+  /// Glyph painted in the drag column of a grid with reorderable rows.
+  final IconData rowDragHandleIcon;
+
+  /// Wash over a selected range of cells. Null derives one from [focusOutline].
+  final Color? rangeSelectionBackground;
+
+  /// Colour of painted bars, sparklines and progress fills. Null follows
+  /// [focusOutline].
+  final Color? chartColor;
+
+  /// Colour of painted bars for negative values. Null uses a red that holds
+  /// up against both light and dark surfaces.
+  final Color? chartNegativeColor;
+
+  /// Background behind an expanded detail row. Null follows
+  /// [groupHeaderBackground].
+  final Color? detailBackground;
+
+  /// Side of the square drag handle at the corner of a selected range.
+  final double fillHandleSize;
+
+  /// Width of the drag column added by `FitGrid.reorderableRows`.
+  final double rowDragHandleWidth;
+
   EdgeInsets get effectiveCellPadding =>
       cellPadding ??
       switch (density) {
@@ -282,6 +325,17 @@ class FitGridThemeData {
       };
 
   double get effectiveHeaderHeight => headerHeight ?? effectiveRowHeight + 4;
+
+  Color get effectiveRangeSelectionBackground =>
+      rangeSelectionBackground ?? focusOutline.withValues(alpha: 0.12);
+
+  Color get effectiveChartColor => chartColor ?? focusOutline;
+
+  Color get effectiveChartNegativeColor =>
+      chartNegativeColor ?? const Color(0xFFD64545);
+
+  Color get effectiveDetailBackground =>
+      detailBackground ?? groupHeaderBackground;
 
   FitGridThemeData copyWith({
     Color? headerBackground,
@@ -333,6 +387,16 @@ class FitGridThemeData {
     EdgeInsets? cellPadding,
     double? headerHeight,
     double? rowHeight,
+    IconData? columnMenuIcon,
+    IconData? filterIcon,
+    IconData? filterActiveIcon,
+    IconData? rowDragHandleIcon,
+    Color? rangeSelectionBackground,
+    Color? chartColor,
+    Color? chartNegativeColor,
+    Color? detailBackground,
+    double? fillHandleSize,
+    double? rowDragHandleWidth,
   }) {
     return FitGridThemeData(
       headerBackground: headerBackground ?? this.headerBackground,
@@ -389,6 +453,17 @@ class FitGridThemeData {
       cellPadding: cellPadding ?? this.cellPadding,
       headerHeight: headerHeight ?? this.headerHeight,
       rowHeight: rowHeight ?? this.rowHeight,
+      columnMenuIcon: columnMenuIcon ?? this.columnMenuIcon,
+      filterIcon: filterIcon ?? this.filterIcon,
+      filterActiveIcon: filterActiveIcon ?? this.filterActiveIcon,
+      rowDragHandleIcon: rowDragHandleIcon ?? this.rowDragHandleIcon,
+      rangeSelectionBackground:
+          rangeSelectionBackground ?? this.rangeSelectionBackground,
+      chartColor: chartColor ?? this.chartColor,
+      chartNegativeColor: chartNegativeColor ?? this.chartNegativeColor,
+      detailBackground: detailBackground ?? this.detailBackground,
+      fillHandleSize: fillHandleSize ?? this.fillHandleSize,
+      rowDragHandleWidth: rowDragHandleWidth ?? this.rowDragHandleWidth,
     );
   }
 
@@ -444,7 +519,17 @@ class FitGridThemeData {
         other.checkboxIcon == checkboxIcon &&
         other.checkboxCheckedIcon == checkboxCheckedIcon &&
         other.checkboxIndeterminateIcon == checkboxIndeterminateIcon &&
-        other.selectionColumnWidth == selectionColumnWidth;
+        other.selectionColumnWidth == selectionColumnWidth &&
+        other.columnMenuIcon == columnMenuIcon &&
+        other.filterIcon == filterIcon &&
+        other.filterActiveIcon == filterActiveIcon &&
+        other.rowDragHandleIcon == rowDragHandleIcon &&
+        other.rangeSelectionBackground == rangeSelectionBackground &&
+        other.chartColor == chartColor &&
+        other.chartNegativeColor == chartNegativeColor &&
+        other.detailBackground == detailBackground &&
+        other.fillHandleSize == fillHandleSize &&
+        other.rowDragHandleWidth == rowDragHandleWidth;
   }
 
   @override
@@ -498,6 +583,16 @@ class FitGridThemeData {
     checkboxCheckedIcon,
     checkboxIndeterminateIcon,
     selectionColumnWidth,
+    columnMenuIcon,
+    filterIcon,
+    filterActiveIcon,
+    rowDragHandleIcon,
+    rangeSelectionBackground,
+    chartColor,
+    chartNegativeColor,
+    detailBackground,
+    fillHandleSize,
+    rowDragHandleWidth,
   ]);
 }
 

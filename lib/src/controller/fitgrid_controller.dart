@@ -3,12 +3,17 @@ import 'package:flutter/foundation.dart';
 import '../model/enums.dart';
 import '../export/fitgrid_export.dart';
 import '../model/fitgrid_column.dart';
+import '../model/sort_key.dart';
 import '../sizing/column_order.dart';
+import 'fitgrid_details.dart';
 import 'fitgrid_editing.dart';
 import 'fitgrid_filter.dart';
 import 'fitgrid_focus.dart';
 import 'fitgrid_grouping.dart';
+import 'fitgrid_history.dart';
 import 'fitgrid_pagination.dart';
+import 'fitgrid_range.dart';
+import 'fitgrid_saved_state.dart';
 
 /// Rows, and the ordering applied to them.
 ///
@@ -43,15 +48,32 @@ class FitGridDataState<T> extends ChangeNotifier {
     notifyListeners();
   }
 
-  String? _sortColumnId;
+  List<FitGridSortKey> _sortKeys = const <FitGridSortKey>[];
+  List<Comparator<T>> _comparators = <Comparator<T>>[];
 
-  /// Id of the column currently ordering the grid, or null when unsorted.
-  String? get sortColumnId => _sortColumnId;
+  /// The active sort, highest priority first. Empty when unsorted.
+  List<FitGridSortKey> get sortKeys => _sortKeys;
 
-  FitGridSortDirection _sortDirection = FitGridSortDirection.none;
-  FitGridSortDirection get sortDirection => _sortDirection;
+  /// Id of the column deciding the order, or null when unsorted. With several
+  /// sort keys this is the first of them.
+  String? get sortColumnId =>
+      _sortKeys.isEmpty ? null : _sortKeys.first.columnId;
 
-  Comparator<T>? _comparator;
+  /// Direction of the primary sort key.
+  FitGridSortDirection get sortDirection =>
+      _sortKeys.isEmpty ? FitGridSortDirection.none : _sortKeys.first.direction;
+
+  /// The direction [columnId] is sorted in, whatever its priority.
+  FitGridSortDirection directionOf(String columnId) {
+    for (final key in _sortKeys) {
+      if (key.columnId == columnId) return key.direction;
+    }
+    return FitGridSortDirection.none;
+  }
+
+  /// Where [columnId] sits in the sort, from 0, or -1 when it is not sorted.
+  int sortPriorityOf(String columnId) =>
+      _sortKeys.indexWhere((key) => key.columnId == columnId);
 
   /// The rows in display order.
   List<T> get view => _view ??= _buildView();
@@ -60,17 +82,39 @@ class FitGridDataState<T> extends ChangeNotifier {
 
   T operator [](int index) => view[index];
 
-  /// Applies a sort. Passing [FitGridSortDirection.none] clears it and returns
-  /// the rows to their original order — which is why the unsorted list is kept
-  /// rather than sorted in place.
+  /// Sorts by one column, replacing any other sort. Passing
+  /// [FitGridSortDirection.none] clears it and returns the rows to their
+  /// original order — which is why the unsorted list is kept rather than
+  /// sorted in place.
   void sort(
     String columnId,
     FitGridSortDirection direction,
     Comparator<T> comparator,
   ) {
-    _sortColumnId = direction == FitGridSortDirection.none ? null : columnId;
-    _sortDirection = direction;
-    _comparator = direction == FitGridSortDirection.none ? null : comparator;
+    if (direction == FitGridSortDirection.none) {
+      sortBy(const <FitGridSortKey>[], const []);
+    } else {
+      sortBy(
+        <FitGridSortKey>[FitGridSortKey(columnId, direction)],
+        [comparator],
+      );
+    }
+  }
+
+  /// Sorts by several columns at once, [keys] in priority order and
+  /// [comparators] parallel to them.
+  ///
+  /// Ties on every key keep their original relative order: the sort is
+  /// stable, so "by department, then by name" never shuffles two people with
+  /// the same name in the same department.
+  void sortBy(List<FitGridSortKey> keys, List<Comparator<T>> comparators) {
+    assert(keys.length == comparators.length);
+    assert(
+      keys.every((key) => key.direction != FitGridSortDirection.none),
+      'An unsorted column is left out of the keys, not given `none`.',
+    );
+    _sortKeys = List<FitGridSortKey>.unmodifiable(keys);
+    _comparators = List<Comparator<T>>.of(comparators);
     _view = null;
     notifyListeners();
   }
@@ -78,32 +122,54 @@ class FitGridDataState<T> extends ChangeNotifier {
   /// The next state in the tri-state cycle for [columnId]: ascending, then
   /// descending, then unsorted.
   FitGridSortDirection nextDirectionFor(String columnId) {
-    if (_sortColumnId != columnId) return FitGridSortDirection.ascending;
-    return switch (_sortDirection) {
+    return switch (directionOf(columnId)) {
       FitGridSortDirection.ascending => FitGridSortDirection.descending,
       FitGridSortDirection.descending => FitGridSortDirection.none,
       FitGridSortDirection.none => FitGridSortDirection.ascending,
     };
   }
 
+  /// Moves the row at [from] so that it ends up at [to], both indices into
+  /// [rows] — the supplied order, not the view.
+  void moveRow(int from, int to) {
+    if (from == to || from < 0 || from >= _rows.length) return;
+    final row = _rows.removeAt(from);
+    _rows.insert(to.clamp(0, _rows.length), row);
+    _view = null;
+    notifyListeners();
+  }
+
   List<T> _buildView() {
     final filter = _filter;
-    final comparator = _comparator;
     // An unfiltered, unsorted grid hands back the original list rather than a
     // copy of it: downstream caches are keyed on its identity, so copying here
     // would invalidate the column measurement on every build.
-    if (filter == null && comparator == null) return _rows;
+    if (filter == null && _sortKeys.isEmpty) return _rows;
     final base = filter == null
         ? _rows
         : <T>[
             for (final row in _rows)
               if (filter(row)) row,
           ];
-    if (comparator == null) return base;
-    final sorted = List<T>.of(base);
-    final sign = _sortDirection == FitGridSortDirection.descending ? -1 : 1;
-    sorted.sort((a, b) => sign * comparator(a, b));
-    return sorted;
+    if (_sortKeys.isEmpty) return base;
+    return _stableSort(base);
+  }
+
+  /// Dart's `List.sort` is not stable, and a multi-key sort leans on
+  /// stability for its last tie-break: rows equal on every key should stay in
+  /// the order they were supplied. So the original position is the final key.
+  List<T> _stableSort(List<T> base) {
+    final keys = _sortKeys;
+    final comparators = _comparators;
+    final order = List<int>.generate(base.length, (i) => i);
+    order.sort((a, b) {
+      for (var k = 0; k < keys.length; k++) {
+        final result = comparators[k](base[a], base[b]);
+        if (result != 0) return keys[k].descending ? -result : result;
+      }
+      return a - b;
+    });
+    return <T>[for (final i in order) base[i]];
   }
 }
 
@@ -207,6 +273,85 @@ class FitGridColumnState<T> extends ChangeNotifier {
     final index = _columns.indexWhere((column) => column.id == id);
     if (index < 0 || _columns[index].visible == visible) return;
     _columns[index] = _columns[index].copyWith(visible: visible);
+    _invalidate();
+    notifyListeners();
+  }
+
+  /// Makes every column visible again.
+  void showAll() {
+    var changed = false;
+    for (var i = 0; i < _columns.length; i++) {
+      if (_columns[i].visible) continue;
+      _columns[i] = _columns[i].copyWith(visible: true);
+      changed = true;
+    }
+    if (!changed) return;
+    _invalidate();
+    notifyListeners();
+  }
+
+  /// Pins a column to an edge, or unpins it with [FitGridFreeze.none].
+  ///
+  /// The column keeps its place in the declared order, so unpinning puts it
+  /// back where it came from rather than leaving it at the edge.
+  void setFreeze(String id, FitGridFreeze freeze) {
+    final index = _columns.indexWhere((column) => column.id == id);
+    if (index < 0 || _columns[index].freeze == freeze) return;
+    _columns[index] = _columns[index].copyWith(freeze: freeze);
+    _invalidate();
+    notifyListeners();
+  }
+
+  /// Applies a saved layout in one step — one rebuild, one re-measure —
+  /// rather than a notification per column.
+  ///
+  /// Ids that no longer exist are ignored. Columns the saved [order] does not
+  /// mention keep the position they were declared in, and the mentioned ones
+  /// are arranged among the remaining places in the saved order: a column
+  /// added in an app update appears where its author put it rather than
+  /// tacked on the end.
+  void applyLayout({
+    List<String> order = const <String>[],
+    Set<String>? hidden,
+    Map<String, FitGridFreeze> freezes = const <String, FitGridFreeze>{},
+    Map<String, double>? widths,
+  }) {
+    final known = <String>{for (final column in _columns) column.id};
+    final ranked = <String>[
+      for (final id in order)
+        if (known.contains(id)) id,
+    ];
+    if (ranked.length > 1) {
+      final rank = <String, int>{
+        for (var i = 0; i < ranked.length; i++) ranked[i]: i,
+      };
+      final slots = <int>[
+        for (var i = 0; i < _columns.length; i++)
+          if (rank.containsKey(_columns[i].id)) i,
+      ];
+      final moving = <FitGridColumn<T>>[for (final i in slots) _columns[i]]
+        ..sort((a, b) => rank[a.id]!.compareTo(rank[b.id]!));
+      for (var k = 0; k < slots.length; k++) {
+        _columns[slots[k]] = moving[k];
+      }
+    }
+    for (var i = 0; i < _columns.length; i++) {
+      final column = _columns[i];
+      final visible = hidden == null
+          ? column.visible
+          : !hidden.contains(column.id);
+      final freeze = freezes[column.id] ?? column.freeze;
+      if (visible != column.visible || freeze != column.freeze) {
+        _columns[i] = column.copyWith(visible: visible, freeze: freeze);
+      }
+    }
+    if (widths != null) {
+      _widthOverrides
+        ..clear()
+        ..addEntries(
+          widths.entries.where((entry) => known.contains(entry.key)),
+        );
+    }
     _invalidate();
     notifyListeners();
   }
@@ -413,6 +558,55 @@ class FitGridController<T> {
   /// Grouping levels, tree structure, and which of them are open.
   final FitGridGroupingState<T> grouping = FitGridGroupingState<T>();
 
+  /// The selected rectangle of cells, when `FitGrid.cellSelection` is on.
+  final FitGridCellRangeState range = FitGridCellRangeState();
+
+  /// Which rows have their detail panel open, when `FitGrid.detailBuilder`
+  /// is set.
+  final FitGridDetailState details = FitGridDetailState();
+
+  /// The user's edits, for [undo] and [redo].
+  final FitGridEditHistory history = FitGridEditHistory();
+
+  /// Reverts the most recent edit — a typed value, a paste, a clear — by
+  /// committing the previous values back through the columns' editors.
+  /// Returns whether there was anything to undo.
+  bool undo() => _replay(history.takeUndo());
+
+  /// Reapplies the most recently undone edit.
+  bool redo() => _replay(history.takeRedo());
+
+  bool _replay(List<FitGridCellChange>? changes) {
+    if (changes == null) return false;
+    // Built on the first change whose row has moved, and at most once: undoing
+    // a paste of a thousand cells should not scan the rows a thousand times.
+    Map<Object, int>? byKey;
+    for (final change in changes) {
+      final editor = columns.byId(change.columnId)?.editor;
+      if (editor == null) continue;
+      final view = data.view;
+      var index = change.rowIndex;
+      final inPlace =
+          index >= 0 &&
+          index < view.length &&
+          history.keyOf(view[index]) == change.rowKey;
+      if (!inPlace) {
+        byKey ??= <Object, int>{
+          for (var i = 0; i < view.length; i++) history.keyOf(view[i]): i,
+        };
+        // A key that matches nothing — a replaced immutable row with no
+        // `rowKey` — falls back to where the row was.
+        index = byKey[change.rowKey] ?? index;
+      }
+      if (index < 0 || index >= view.length) continue;
+      // No validator: the value was valid when it was written, and refusing
+      // to put it back would strand the user with the edit they meant to
+      // take back.
+      editor.onCommit(view[index], index, change.after);
+    }
+    return true;
+  }
+
   void Function(int rowIndex, String? columnId, double padding)? _reveal;
 
   /// Wires the controller to a mounted grid so [scrollTo] has something to
@@ -441,11 +635,55 @@ class FitGridController<T> {
   }
 
   /// Cycles the sort on a column: ascending, descending, unsorted.
-  void toggleSort(String columnId) {
+  ///
+  /// With [additive] — what Shift+click on a header does — the column is
+  /// added to the existing sort as its lowest-priority key rather than
+  /// replacing it, and cycling it off removes only that key. Without it the
+  /// column becomes the whole sort, which is what a plain click has always
+  /// meant.
+  void toggleSort(String columnId, {bool additive = false}) {
     final column = columns.byId(columnId);
     if (column == null || !column.sortable) return;
-    data.sort(columnId, data.nextDirectionFor(columnId), column.compare);
+    final next = data.nextDirectionFor(columnId);
+    if (!additive) {
+      data.sort(columnId, next, column.compare);
+      return;
+    }
+    final keys = <FitGridSortKey>[
+      for (final key in data.sortKeys)
+        if (key.columnId != columnId) key,
+    ];
+    final at = data.sortPriorityOf(columnId);
+    if (next != FitGridSortDirection.none) {
+      // A key already in the sort keeps its priority as it flips direction.
+      keys.insert(at < 0 ? keys.length : at, FitGridSortKey(columnId, next));
+    }
+    setSort(keys);
   }
+
+  /// Replaces the whole sort, highest priority first.
+  ///
+  /// Keys naming a column that does not exist or is not sortable are dropped,
+  /// as are repeats, so a sort restored from saved state cannot wedge the grid
+  /// on a column that has since been removed.
+  void setSort(List<FitGridSortKey> keys) {
+    final kept = <FitGridSortKey>[];
+    final comparators = <Comparator<T>>[];
+    final seen = <String>{};
+    for (final key in keys) {
+      if (key.direction == FitGridSortDirection.none) continue;
+      final column = columns.byId(key.columnId);
+      if (column == null || !column.sortable || !seen.add(key.columnId)) {
+        continue;
+      }
+      kept.add(key);
+      comparators.add(column.compare);
+    }
+    data.sortBy(kept, comparators);
+  }
+
+  /// Removes every sort key, returning the rows to their supplied order.
+  void clearSort() => data.sortBy(const <FitGridSortKey>[], <Comparator<T>>[]);
 
   /// The grid's contents in the shape an exporter wants.
   ///
@@ -465,6 +703,56 @@ class FitGridController<T> {
     only: selectedOnly ? selection.selected : null,
     includeHeaders: includeHeaders,
   );
+
+  /// A snapshot of the view — column layout, sort, filters, search and page —
+  /// for the app to keep and hand back to [restoreState] later.
+  ///
+  /// Only structured filters are saved: a predicate set through
+  /// `filter.setColumnFilter` is a closure, and there is no way to write one
+  /// down.
+  FitGridSavedState saveState() {
+    final all = columns.columns;
+    return FitGridSavedState(
+      columnOrder: <String>[for (final column in all) column.id],
+      hiddenColumns: <String>{
+        for (final column in all)
+          if (!column.visible) column.id,
+      },
+      frozenColumns: <String, FitGridFreeze>{
+        for (final column in all) column.id: column.freeze,
+      },
+      columnWidths: columns.widthOverrides,
+      sort: data.sortKeys,
+      filters: filter.filters,
+      query: filter.query,
+      pageSize: pagination.enabled ? pagination.pageSize : null,
+      pageIndex: pagination.enabled ? pagination.pageIndex : null,
+    );
+  }
+
+  /// Puts back a view saved by [saveState].
+  ///
+  /// Forgiving by design: a column that has been removed since, or renamed,
+  /// is skipped, and a sort or filter on it is dropped. Anything the state
+  /// does not mention is left as it is.
+  void restoreState(FitGridSavedState state) {
+    columns.applyLayout(
+      order: state.columnOrder,
+      hidden: state.columnOrder.isEmpty ? null : state.hiddenColumns,
+      freezes: state.frozenColumns,
+      widths: state.columnWidths,
+    );
+    setSort(state.sort);
+    filter.clearColumnFilters();
+    for (final entry in state.filters.entries) {
+      if (columns.byId(entry.key) != null) {
+        filter.setFilter(entry.key, entry.value);
+      }
+    }
+    filter.query = state.query;
+    if (state.pageSize != null) pagination.pageSize = state.pageSize!;
+    if (state.pageIndex != null) pagination.pageIndex = state.pageIndex!;
+  }
 
   /// Moves a column so that it sits where [targetId] is now.
   ///
@@ -492,5 +780,8 @@ class FitGridController<T> {
     focus.dispose();
     filter.dispose();
     grouping.dispose();
+    range.dispose();
+    details.dispose();
+    history.dispose();
   }
 }

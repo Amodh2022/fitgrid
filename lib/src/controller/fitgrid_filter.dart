@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../model/column_filter.dart';
 import '../model/fitgrid_column.dart';
 
 /// The active search text and column filters.
@@ -36,7 +37,43 @@ class FitGridFilterState<T> extends ChangeNotifier {
   Map<String, FitGridRowPredicate<T>> get columnFilters =>
       Map<String, FitGridRowPredicate<T>>.unmodifiable(_columnFilters);
 
-  bool get isEmpty => _query.isEmpty && _columnFilters.isEmpty;
+  final Map<String, FitGridColumnFilter> _filters =
+      <String, FitGridColumnFilter>{};
+
+  /// The filters set through the filter UI, or [setFilter], keyed by column
+  /// id. Unlike [columnFilters] these are data rather than closures, so they
+  /// can be shown back to the user, saved, and sent to a server.
+  Map<String, FitGridColumnFilter> get filters =>
+      Map<String, FitGridColumnFilter>.unmodifiable(_filters);
+
+  /// Every filter as JSON, keyed by column id — what a data source receives.
+  Map<String, Object?> get filtersJson => <String, Object?>{
+    for (final entry in _filters.entries) entry.key: entry.value.toJson(),
+  };
+
+  /// Ids of the columns narrowed by a filter of either kind.
+  Set<String> get filteredColumnIds => <String>{
+    ..._filters.keys,
+    ..._columnFilters.keys,
+  };
+
+  bool get isEmpty =>
+      _query.isEmpty && _columnFilters.isEmpty && _filters.isEmpty;
+
+  /// Sets, or with null clears, a column's filter.
+  ///
+  /// The column must have a [FitGridColumn.filter] spec for the filter to
+  /// apply: the spec is what knows how to read a number or a date out of a
+  /// row. A filter on a column without one is kept but ignored.
+  void setFilter(String columnId, FitGridColumnFilter? filter) {
+    if (filter == null) {
+      if (_filters.remove(columnId) == null) return;
+    } else {
+      if (_filters[columnId] == filter) return;
+      _filters[columnId] = filter;
+    }
+    notifyListeners();
+  }
 
   void setColumnFilter(String columnId, FitGridRowPredicate<T>? predicate) {
     if (predicate == null) {
@@ -47,9 +84,11 @@ class FitGridFilterState<T> extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Clears every column filter, of both kinds, leaving the search.
   void clearColumnFilters() {
-    if (_columnFilters.isEmpty) return;
+    if (_columnFilters.isEmpty && _filters.isEmpty) return;
     _columnFilters.clear();
+    _filters.clear();
     notifyListeners();
   }
 
@@ -57,6 +96,7 @@ class FitGridFilterState<T> extends ChangeNotifier {
     if (isEmpty) return;
     _query = '';
     _columnFilters.clear();
+    _filters.clear();
     notifyListeners();
   }
 
@@ -89,6 +129,16 @@ class FitGridFilterState<T> extends ChangeNotifier {
         : text.toLowerCase().contains(_query.toLowerCase());
   }
 
+  static FitGridColumn<T>? _columnById<T>(
+    List<FitGridColumn<T>> columns,
+    String id,
+  ) {
+    for (final column in columns) {
+      if (column.id == id) return column;
+    }
+    return null;
+  }
+
   /// Builds the predicate the data state filters with, or null when nothing is
   /// filtered — which is the signal to skip the pass entirely rather than run
   /// a predicate that always says yes over every row.
@@ -107,6 +157,18 @@ class FitGridFilterState<T> extends ChangeNotifier {
         filters.add(entry.value);
       }
     }
+
+    for (final entry in _filters.entries) {
+      final column = _columnById(columns, entry.key);
+      final spec = column?.filter;
+      if (column == null || spec == null) continue;
+      final filter = entry.value;
+      filters.add(
+        (T row) => filter.matches(column.value(row), spec.typedValueOf(row)),
+      );
+    }
+    // Everything asked for was on a hidden or removed column: nothing narrows.
+    if (_query.isEmpty && filters.isEmpty) return null;
 
     return (T row) {
       for (final predicate in filters) {

@@ -3,8 +3,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
+import '../model/column_group.dart';
 import '../model/enums.dart';
 import '../model/fitgrid_column.dart';
+import '../model/sort_key.dart';
 import '../sizing/column_layout.dart';
 import '../theme/fitgrid_theme.dart';
 
@@ -27,12 +29,16 @@ class FitGridHeader<T> extends StatelessWidget {
     required this.layout,
     required this.theme,
     required this.horizontalOffset,
-    required this.sortColumnId,
-    required this.sortDirection,
+    this.sortColumnId,
+    this.sortDirection = FitGridSortDirection.none,
+    this.sortKeys = const <FitGridSortKey>[],
     required this.onSort,
     this.onResize,
     this.onAutoSize,
     this.onReorder,
+    this.onColumnMenu,
+    this.activeFilters = const <String>{},
+    this.columnGroups = const <FitGridColumnGroup>[],
     super.key,
   });
 
@@ -42,7 +48,28 @@ class FitGridHeader<T> extends StatelessWidget {
   final double horizontalOffset;
   final String? sortColumnId;
   final FitGridSortDirection sortDirection;
+
+  /// The whole sort, highest priority first. When it is set it wins over
+  /// [sortColumnId] and [sortDirection], and with more than one key each
+  /// sorted header shows its priority beside the arrow.
+  final List<FitGridSortKey> sortKeys;
+
   final ValueChanged<String>? onSort;
+
+  /// Where a column sits in the sort and which way it runs, or (-1, none).
+  (int, FitGridSortDirection) sortStateOf(String columnId) {
+    if (sortKeys.isNotEmpty) {
+      for (var i = 0; i < sortKeys.length; i++) {
+        if (sortKeys[i].columnId == columnId) {
+          return (i, sortKeys[i].direction);
+        }
+      }
+      return (-1, FitGridSortDirection.none);
+    }
+    return columnId == sortColumnId
+        ? (0, sortDirection)
+        : (-1, FitGridSortDirection.none);
+  }
 
   /// Called with a column id and the width the user has dragged it to. The
   /// width is raw: the sizer still clamps it against the column's own policy,
@@ -57,12 +84,48 @@ class FitGridHeader<T> extends StatelessWidget {
   /// ids. Null leaves columns where they were declared.
   final void Function(String movedId, String targetId)? onReorder;
 
+  /// Opens the column menu for a column. Given the context of the button that
+  /// asked, so the menu can be anchored to it. Null shows no menu button.
+  final void Function(String columnId, BuildContext anchor)? onColumnMenu;
+
+  /// Ids of the columns carrying a filter, whose headers show a filter glyph.
+  final Set<String> activeFilters;
+
+  /// Bands spanning several columns, drawn as a row above their headers.
+  final List<FitGridColumnGroup> columnGroups;
+
+  /// Height of the band row. Nothing when there are no groups, so a grid
+  /// without them keeps the header height it always had.
+  static double groupRowHeight(
+    FitGridThemeData theme,
+    List<FitGridColumnGroup> groups,
+  ) => groups.isEmpty
+      ? 0.0
+      : (theme.effectiveHeaderHeight * 0.75).roundToDouble();
+
+  /// Total height of the header, band row included.
+  static double heightFor(
+    FitGridThemeData theme,
+    List<FitGridColumnGroup> groups,
+  ) => theme.effectiveHeaderHeight + groupRowHeight(theme, groups);
+
+  /// The group each column belongs to, by id.
+  Map<String, FitGridColumnGroup> get _groupOf {
+    final out = <String, FitGridColumnGroup>{};
+    for (final group in columnGroups) {
+      for (final id in group.columnIds) {
+        out.putIfAbsent(id, () => group);
+      }
+    }
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
     final textDirection = Directionality.of(context);
 
     return SizedBox(
-      height: theme.effectiveHeaderHeight,
+      height: heightFor(theme, columnGroups),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final viewport = constraints.maxWidth;
@@ -195,15 +258,49 @@ class _Band<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     if (lastColumn <= firstColumn) return const SizedBox.shrink();
     final layout = header.layout;
+    final groupOf = header._groupOf;
+    final bandHeight = FitGridHeader.groupRowHeight(
+      header.theme,
+      header.columnGroups,
+    );
+    FitGridColumnGroup? groupAt(int i) => groupOf[header.columns[i].id];
+
+    // Contiguous runs of one group, within this band only: a group split by a
+    // pin or a drag gets a band per run, each over its own columns.
+    final runs = <(int, int, FitGridColumnGroup)>[];
+    for (var i = firstColumn; i < lastColumn;) {
+      final group = groupAt(i);
+      var end = i + 1;
+      while (end < lastColumn && groupAt(end) == group && group != null) {
+        end++;
+      }
+      if (group != null) runs.add((i, end, group));
+      i = end;
+    }
 
     return Stack(
       clipBehavior: clipped ? Clip.hardEdge : Clip.none,
       children: [
+        for (final (start, end, group) in runs)
+          Positioned.directional(
+            textDirection: textDirection,
+            start: layout.offsets[start] - origin,
+            top: 0,
+            height: bandHeight,
+            width: layout.offsets[end] - layout.offsets[start],
+            child: _GroupCell(
+              group: group,
+              theme: header.theme,
+              isLast: end == layout.length,
+            ),
+          ),
         for (var i = firstColumn; i < lastColumn; i++)
           Positioned.directional(
             textDirection: textDirection,
             start: layout.offsets[i] - origin,
-            top: 0,
+            // An ungrouped column's header takes both rows, so it reads as
+            // one cell rather than a label under an empty band.
+            top: groupAt(i) == null ? 0 : bandHeight,
             bottom: 0,
             width: layout.widths[i],
             child: _HeaderCell<T>(
@@ -211,13 +308,23 @@ class _Band<T> extends StatelessWidget {
               width: layout.widths[i],
               theme: header.theme,
               isLast: i == layout.length - 1,
-              direction: header.columns[i].id == header.sortColumnId
-                  ? header.sortDirection
-                  : FitGridSortDirection.none,
+              direction: header.sortStateOf(header.columns[i].id).$2,
+              // A priority is only worth showing when there is more than one
+              // key to rank: "1" beside the only sorted column is noise.
+              sortPriority: header.sortKeys.length > 1
+                  ? header.sortStateOf(header.columns[i].id).$1
+                  : -1,
               onTap: header.columns[i].sortable && header.onSort != null
                   ? () => header.onSort!(header.columns[i].id)
                   : null,
               onReorder: header.onReorder,
+              onMenu:
+                  header.onColumnMenu == null ||
+                      header.columns[i].id.startsWith('__fitgrid')
+                  ? null
+                  : (anchor) =>
+                        header.onColumnMenu!(header.columns[i].id, anchor),
+              filtered: header.activeFilters.contains(header.columns[i].id),
             ),
           ),
         // The handles are a sibling layer rather than children of the cells: a
@@ -230,7 +337,7 @@ class _Band<T> extends StatelessWidget {
               // Offsets are measured from the leading edge, which is the right
               // one in RTL — so this is the same sum in both directions.
               start: layout.offsets[i + 1] - origin - header.targetWidth(i) / 2,
-              top: 0,
+              top: groupAt(i) == null ? 0 : bandHeight,
               bottom: 0,
               width: header.targetWidth(i),
               child: _ResizeHandle(
@@ -245,6 +352,56 @@ class _Band<T> extends StatelessWidget {
               ),
             ),
       ],
+    );
+  }
+}
+
+/// One band of the group row, spanning its columns.
+class _GroupCell extends StatelessWidget {
+  const _GroupCell({
+    required this.group,
+    required this.theme,
+    required this.isLast,
+  });
+
+  final FitGridColumnGroup group;
+  final FitGridThemeData theme;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final divider = BorderSide(
+      color: theme.columnDivider,
+      width: theme.dividerThickness,
+    );
+    Widget cell = DecoratedBox(
+      decoration: BoxDecoration(
+        border: BorderDirectional(
+          bottom: divider,
+          end: isLast ? BorderSide.none : divider,
+        ),
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: theme.effectiveHeaderPadding.left,
+        ),
+        child: Center(
+          child: Text(
+            group.label,
+            style: theme.headerTextStyle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+    );
+    if (group.tooltip != null) {
+      cell = Tooltip(message: group.tooltip!, child: cell);
+    }
+    return Semantics(
+      container: true,
+      header: true,
+      child: ClipRect(child: cell),
     );
   }
 }
@@ -358,6 +515,9 @@ class _HeaderCell<T> extends StatelessWidget {
     required this.direction,
     required this.onTap,
     required this.onReorder,
+    this.sortPriority = -1,
+    this.onMenu,
+    this.filtered = false,
   });
 
   final FitGridColumn<T> column;
@@ -365,6 +525,15 @@ class _HeaderCell<T> extends StatelessWidget {
   final FitGridThemeData theme;
   final bool isLast;
   final FitGridSortDirection direction;
+
+  /// Zero-based rank in a multi-column sort, or -1 to show none.
+  final int sortPriority;
+
+  /// Opens this column's menu, anchored to the given context.
+  final void Function(BuildContext anchor)? onMenu;
+
+  /// Whether a filter is narrowing this column, which earns a glyph.
+  final bool filtered;
   final VoidCallback? onTap;
   final void Function(String movedId, String targetId)? onReorder;
 
@@ -395,11 +564,21 @@ class _HeaderCell<T> extends StatelessWidget {
     // width left by the time the padding has taken its share.
     Widget content = LayoutBuilder(
       builder: (context, constraints) {
-        final affordance = theme.sortIconSize + _sortGap;
-        final showSort =
-            column.sortable &&
-            constraints.maxWidth >= affordance + _minLabelWidth;
-
+        // The menu button and the filter glyph are claimed before the sort
+        // icon: the menu is the only way to reach hiding, pinning and
+        // filtering, whereas sorting also answers to a tap on the label. The
+        // priority badge goes first of all, since the arrow alone still says
+        // which way the column runs.
+        final extra = theme.sortIconSize + _sortGap;
+        var room = constraints.maxWidth - _minLabelWidth;
+        final showMenu = onMenu != null && room >= extra;
+        if (showMenu) room -= extra;
+        final showFilter = filtered && room >= extra;
+        if (showFilter) room -= extra;
+        final showSort = column.sortable && room >= extra;
+        if (showSort) room -= extra;
+        final badge = theme.sortIconSize * 0.7;
+        final showBadge = showSort && sortPriority >= 0 && room >= badge;
         return Row(
           mainAxisAlignment: alignment,
           children: [
@@ -425,6 +604,49 @@ class _HeaderCell<T> extends StatelessWidget {
                 color: direction == FitGridSortDirection.none
                     ? theme.sortIconColor.withValues(alpha: 0.35)
                     : theme.sortIconColor,
+              ),
+              if (showBadge)
+                SizedBox(
+                  width: badge,
+                  child: Text(
+                    '${sortPriority + 1}',
+                    style: theme.headerTextStyle.copyWith(
+                      fontSize: theme.sortIconSize * 0.6,
+                      color: theme.sortIconColor,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.clip,
+                  ),
+                ),
+            ],
+            if (showFilter) ...[
+              const SizedBox(width: _sortGap),
+              Icon(
+                theme.filterActiveIcon,
+                size: theme.sortIconSize,
+                color: theme.focusOutline,
+              ),
+            ],
+            if (showMenu) ...[
+              const SizedBox(width: _sortGap),
+              Builder(
+                builder: (anchor) => Semantics(
+                  // Its own node, or on a column that is not sortable — whose
+                  // header has no button of its own to stop the merge — the
+                  // label folds into the header's and the button vanishes.
+                  container: true,
+                  button: true,
+                  label: '${column.label} column menu',
+                  child: InkResponse(
+                    radius: theme.sortIconSize,
+                    onTap: () => onMenu!(anchor),
+                    child: Icon(
+                      theme.columnMenuIcon,
+                      size: theme.sortIconSize,
+                      color: theme.sortIconColor.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
               ),
             ],
           ],
@@ -454,10 +676,13 @@ class _HeaderCell<T> extends StatelessWidget {
       hint: onTap == null
           ? null
           : switch (direction) {
-              FitGridSortDirection.ascending => 'sorted ascending',
-              FitGridSortDirection.descending => 'sorted descending',
-              FitGridSortDirection.none => 'not sorted',
-            },
+                  FitGridSortDirection.ascending => 'sorted ascending',
+                  FitGridSortDirection.descending => 'sorted descending',
+                  FitGridSortDirection.none => 'not sorted',
+                } +
+                (sortPriority >= 0
+                    ? ', sort priority ${sortPriority + 1}'
+                    : ''),
       child: DecoratedBox(
         decoration: BoxDecoration(
           border: isLast

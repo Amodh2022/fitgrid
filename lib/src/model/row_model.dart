@@ -63,7 +63,10 @@ class FitGridDisplayRow<T> {
     this.expanded = false,
     this.groupKey,
   }) : label = null,
-       childCount = 0;
+       childCount = 0,
+       detailOf = null,
+       ownerIndex = null,
+       isDetail = false;
 
   const FitGridDisplayRow.header({
     required this.groupKey,
@@ -73,7 +76,30 @@ class FitGridDisplayRow<T> {
     required this.expanded,
   }) : row = null,
        sourceIndex = -1,
-       expandable = true;
+       expandable = true,
+       detailOf = null,
+       ownerIndex = null,
+       isDetail = false;
+
+  /// The expanded detail panel under a row — a full-width line holding
+  /// whatever `FitGrid.detailBuilder` builds for [owner].
+  ///
+  /// Like a header it is not a row: it takes no part in selection, editing,
+  /// copy or the keyboard, so [row] is null and [sourceIndex] is -1. The row
+  /// it belongs to is [detailOf], at [ownerIndex].
+  const FitGridDisplayRow.detail(
+    T owner, {
+    required int this.ownerIndex,
+    this.depth = 0,
+    this.groupKey,
+  }) : row = null,
+       detailOf = owner,
+       sourceIndex = -1,
+       expandable = false,
+       expanded = false,
+       label = null,
+       childCount = 0,
+       isDetail = true;
 
   /// The row itself, or null when this line is a header.
   final T? row;
@@ -100,7 +126,20 @@ class FitGridDisplayRow<T> {
   /// How many rows the header stands over.
   final int childCount;
 
-  bool get isHeader => row == null;
+  /// Whether this line is a detail panel rather than a row or a header.
+  final bool isDetail;
+
+  /// The row a detail panel belongs to, or null for any other line.
+  final T? detailOf;
+
+  /// Index of [detailOf] into the filtered, sorted row list, for a detail
+  /// panel; null otherwise.
+  final int? ownerIndex;
+
+  bool get isHeader => row == null && !isDetail;
+
+  /// Whether this line is a data row — neither a header nor a detail panel.
+  bool get isData => row != null;
 }
 
 /// Flattens rows into display lines, expanding only what is open.
@@ -248,4 +287,31 @@ class _NestedKey {
 
   @override
   String toString() => '$parent/$key';
+}
+
+/// Inserts a detail line after every data line whose row [isExpanded] says is
+/// open.
+///
+/// Only called when at least one detail is open, so a grid whose details are
+/// all closed pays nothing for the feature.
+List<FitGridDisplayRow<T>> insertDetails<T>(
+  List<FitGridDisplayRow<T>> lines,
+  bool Function(T row) isExpanded,
+) {
+  final out = <FitGridDisplayRow<T>>[];
+  for (final line in lines) {
+    out.add(line);
+    final row = line.row;
+    if (row != null && isExpanded(row)) {
+      out.add(
+        FitGridDisplayRow<T>.detail(
+          row,
+          ownerIndex: line.sourceIndex,
+          depth: line.depth,
+          groupKey: line.groupKey,
+        ),
+      );
+    }
+  }
+  return out;
 }

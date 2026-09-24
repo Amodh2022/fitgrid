@@ -1,5 +1,89 @@
 # Changelog
 
+## 0.1.0
+
+The release that turns a fast table into a grid people can work in. Every
+feature below is opt-in or invisible until used: an existing grid looks and
+behaves as it did, and the package still has no dependency beyond Flutter.
+
+### Sorting, columns and filters
+
+- **Multi-column sort.** Shift+click adds a column to the sort; sorted headers
+  show their priority. `FitGridController.setSort` / `clearSort`,
+  `toggleSort(additive:)`, `FitGridSortKey`, and a stable multi-key sort. Data
+  sources get `sortByKeys` and `FitGridPageRequest.sortKeys`, defaulting to the
+  primary key so existing sources keep working. `FitGrid.multiSort` turns the
+  gesture off.
+- **Column menu.** `FitGrid.showColumnMenu` puts a menu on every header: sort,
+  filter, pin to either edge, size to fit, hide, and the column chooser.
+  `columnMenuBuilder` edits it.
+- **Column chooser.** `FitGridColumnChooser`, `showFitGridColumnDialog` and
+  `fitGridColumnChooserItems`. `FitGridColumn.hideable`; the column state gains
+  `showAll` and `setFreeze`.
+- **Filter UI.** `FitGridColumn.filter` with `FitGridFilterSpec.text`,
+  `.number`, `.date` or `.values` (a searchable checklist). Filters are data —
+  `FitGridColumnFilter`, JSON round-trippable — held in
+  `FitGridFilterState.filters`, shown as a header glyph, and forwarded to data
+  sources through `filterBy` and `FitGridPageRequest.filters`.
+- **Header bands.** `FitGrid.columnGroups` with `FitGridColumnGroup`.
+- **Saved layouts.** `controller.saveState()` / `restoreState()` with
+  `FitGridSavedState`: order, visibility, pins, widths, sort, filters, search
+  and page.
+
+### Cells
+
+- **Range selection.** `FitGrid.cellSelection`: mouse drag with edge
+  auto-scroll, Shift+click, Shift+arrows. Ranges copy as blocks, and live on
+  `FitGridController.range`.
+- **Paste and clear.** Ctrl+V pastes a block, or fills a range with one value;
+  Delete/Backspace clears. Every value goes through the column's validator and
+  commit. `fitGridParseDelimited`, `FitGridCellEdit`.
+- **Fill handle.** Drag the range's corner to continue series or repeat values
+  — `fitGridFillSeries`.
+- **Undo and redo.** Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y over typed edits, pastes,
+  clears and fills; `controller.undo()` / `redo()` and
+  `FitGridController.history`. `FitGrid.enableUndo`.
+- **Charts in cells.** `FitGridColumn.visual` with `FitGridCellVisual.bar`,
+  `.progress` and `.sparkline`, painted by the text pass.
+
+### Rows
+
+- **Detail rows.** `FitGrid.detailBuilder` opens a full-width panel under a row
+  from a chevron column; panels follow their row by `FitGrid.rowKey` and compose
+  with grouping, trees and pagination. `FitGridController.details`.
+- **Sticky group headers**, stacked and pushed away by the next group. On by
+  default (`FitGrid.stickyGroupHeaders`); a grid at rest is unchanged.
+- **Row reordering.** `FitGrid.reorderableRows` with drag handles and
+  Alt+Up/Down; `onRowReorder` for hosts that own their list.
+- **Infinite scroll.** `FitGrid.onLoadMore`, `hasMoreRows`,
+  `loadMoreThreshold`, `loadingRowCount`, with skeleton rows while loading.
+  Rows a data source has not delivered now paint as skeletons too.
+
+### Export and analysis
+
+- **xlsx export.** `fitGridToXlsx` writes a workbook in pure Dart — no new
+  dependency, and it runs on the web.
+- **Pivots.** `fitGridPivot` with `FitGridPivotDimension`,
+  `FitGridPivotValue` and `FitGridAggregation` produces an ordinary grid's rows
+  and columns, with grand totals reduced from the source rows.
+
+### Fixes
+
+- Keys typed into an open editor no longer reach the grid: Space used to toggle
+  the row's selection and the arrow keys moved the grid's focus. Grid shortcuts
+  now act only while the grid itself holds focus.
+- Each cell's spec is resolved once per paint rather than twice.
+
+### Other
+
+- The minimum Flutter version is now stated correctly as 3.35 (Dart 3.9), which
+  the package already required.
+- Agents working with the package can install its skill with
+  `dart run skills@ get` — see `skills/`.
+- The example gallery gains six pages: spreadsheet editing; columns, filters
+  and saved layouts; pivot and export; detail rows with nested grids; infinite
+  scroll against a slow, failing feed; reorderable rows; and charts in cells.
+
 ## 0.1.0-dev
 
 The release that closes the gaps between "interesting approach" and "you could

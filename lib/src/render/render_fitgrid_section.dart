@@ -37,14 +37,29 @@ typedef FitGridCellSpanResolver = int Function(int rowIndex, int columnIndex);
 /// grouped and tree rows without any of them being a separate kind of row.
 typedef FitGridRowIndentResolver = double Function(int rowIndex);
 
+/// The headers to keep pinned while [firstRow] is the first row on screen,
+/// outermost first — the group the row is in, the group around that, and so
+/// on. Rows are indices into the section.
+typedef FitGridStickyChainResolver = List<int> Function(int firstRow);
+
+/// The first row after a pinned header's group — where the next header at its
+/// level, or the end, begins. It is what pushes the pinned header up and off.
+typedef FitGridGroupEndResolver = int Function(int headerRow);
+
 /// Parent data for overlay children — the real widgets layered over the
 /// painted grid for cells that need interactivity or chrome.
 class FitGridCellParentData extends ContainerBoxParentData<RenderBox> {
   /// Absolute row index, not an index into the visible window.
   int rowIndex = -1;
 
-  /// Index into the visible columns of the section's [FitGridColumnLayout].
+  /// Index into the visible columns of the section's [FitGridColumnLayout],
+  /// or [fullRow] for a child that spans the whole row.
   int columnIndex = -1;
+
+  /// The [columnIndex] of a child laid across the full width of the section —
+  /// a detail panel — rather than into one column. It ignores the bands: it
+  /// neither scrolls sideways nor hides beneath a pinned column.
+  static const int fullRow = -2;
 }
 
 /// Paints a rectangular block of grid cells as text, with real widgets layered
@@ -101,9 +116,16 @@ class RenderFitGridSection extends RenderBox
     int focusedRow = -1,
     int focusedColumn = -1,
     int hoveredRow = -1,
+    (int, int, int, int) selectedRange = noRange,
+    int dropLine = -1,
+    (int, int) fillHandleCell = (-1, -1),
+    (int, int, int, int) fillPreview = noRange,
     int rowIndexOffset = 0,
     FitGridCellSpanResolver? cellSpan,
     FitGridRowIndentResolver? rowIndent,
+    FitGridRowFlagResolver? isFullRow,
+    FitGridStickyChainResolver? stickyChain,
+    FitGridGroupEndResolver? groupEnd,
     void Function(int row, int column)? onCellActivate,
   }) : _columnLayout = columnLayout,
        _paintColumns = paintColumns,
@@ -124,9 +146,16 @@ class RenderFitGridSection extends RenderBox
        _focusedRow = focusedRow,
        _focusedColumn = focusedColumn,
        _hoveredRow = hoveredRow,
+       _selectedRange = selectedRange,
+       _dropLine = dropLine,
+       _fillHandleCell = fillHandleCell,
+       _fillPreview = fillPreview,
        _rowIndexOffset = rowIndexOffset,
        _cellSpan = cellSpan,
        _rowIndent = rowIndent,
+       _isFullRow = isFullRow,
+       _stickyChain = stickyChain,
+       _groupEnd = groupEnd,
        _onCellActivate = onCellActivate;
 
   // ---------------------------------------------------------------- geometry
@@ -390,6 +419,91 @@ class RenderFitGridSection extends RenderBox
     markNeedsPaint();
   }
 
+  /// The empty range: nothing selected.
+  static const (int, int, int, int) noRange = (-1, -1, -1, -1);
+
+  (int, int, int, int) _selectedRange;
+
+  /// The selected block of cells as (first row, last row, first column, last
+  /// column), inclusive and in this section's own indices, or [noRange].
+  ///
+  /// Painted as a wash with an outline, in the same pass as everything else,
+  /// so a range over ten thousand cells costs one rectangle per band.
+  (int, int, int, int) get selectedRange => _selectedRange;
+  set selectedRange((int, int, int, int) value) {
+    if (_selectedRange == value) return;
+    _selectedRange = value;
+    markNeedsPaint();
+    markNeedsSemanticsUpdate();
+  }
+
+  int _dropLine;
+
+  /// Where a dragged row would land: a line is drawn along the top edge of
+  /// this row, or along the bottom of the last row when it equals the row
+  /// count. -1 draws nothing.
+  int get dropLine => _dropLine;
+  set dropLine(int value) {
+    if (_dropLine == value) return;
+    _dropLine = value;
+    markNeedsPaint();
+  }
+
+  (int, int) _fillHandleCell;
+
+  /// The cell whose far corner carries the fill handle — the corner of the
+  /// selected range — or (-1, -1) for none.
+  (int, int) get fillHandleCell => _fillHandleCell;
+  set fillHandleCell((int, int) value) {
+    if (_fillHandleCell == value) return;
+    _fillHandleCell = value;
+    markNeedsPaint();
+  }
+
+  (int, int, int, int) _fillPreview;
+
+  /// The block a fill drag would write, outlined while the drag is under way.
+  set fillPreview((int, int, int, int) value) {
+    if (_fillPreview == value) return;
+    _fillPreview = value;
+    markNeedsPaint();
+  }
+
+  /// The fill handle's box in this box's own coordinates, or null.
+  Rect? get fillHandleRect {
+    final (row, column) = _fillHandleCell;
+    if (row < 0 || row >= rowCount) return null;
+    if (column < 0 || column >= _columnLayout.length) return null;
+    final side = _theme.fillHandleSize;
+    final left = _screenLeft(column);
+    final x = _textDirection == TextDirection.ltr
+        ? left + _columnLayout.widths[column]
+        : left;
+    final y = _rowMetrics.offsetOf(row + 1) - _verticalOffset;
+    // Kept inside the section: on the last column, or the last row at the
+    // bottom of the viewport, a handle centred on the corner would hang half
+    // outside — half hidden, and half beyond where a press can reach it.
+    final half = side / 2;
+    return Rect.fromCenter(
+      center: Offset(
+        x.clamp(half, math.max(half, size.width - half)),
+        y.clamp(half, math.max(half, size.height - half)),
+      ),
+      width: side,
+      height: side,
+    );
+  }
+
+  /// Whether a local position is on the fill handle, with a margin: a
+  /// seven-pixel square is a fine thing to see and a poor thing to aim at.
+  bool hitsFillHandle(Offset position, {double slop = 6}) =>
+      fillHandleRect?.inflate(slop).contains(position) ?? false;
+
+  bool _inRange(int row, int column) {
+    final (r0, r1, c0, c1) = _selectedRange;
+    return r0 >= 0 && row >= r0 && row <= r1 && column >= c0 && column <= c1;
+  }
+
   int _rowIndexOffset;
 
   /// What to add to a local row index to get the index into the whole dataset.
@@ -426,6 +540,104 @@ class RenderFitGridSection extends RenderBox
     if (_rowIndent == value) return;
     _rowIndent = value;
     markNeedsPaint();
+  }
+
+  FitGridRowFlagResolver? _isFullRow;
+
+  /// Rows given over entirely to a full-width child — detail panels. Their
+  /// cells are not painted and not announced: the child is the content, and
+  /// it carries its own semantics.
+  set isFullRow(FitGridRowFlagResolver? value) {
+    if (_isFullRow == value) return;
+    _isFullRow = value;
+    markNeedsPaint();
+    markNeedsSemanticsUpdate();
+  }
+
+  bool _fullRow(int row) => _isFullRow?.call(row) ?? false;
+
+  FitGridStickyChainResolver? _stickyChain;
+  FitGridGroupEndResolver? _groupEnd;
+
+  /// Group headers pinned to the top while their rows scroll beneath them.
+  /// Null pins nothing.
+  set stickyChain(FitGridStickyChainResolver? value) {
+    if (_stickyChain == value) return;
+    _stickyChain = value;
+    markNeedsPaint();
+  }
+
+  set groupEnd(FitGridGroupEndResolver? value) {
+    if (_groupEnd == value) return;
+    _groupEnd = value;
+    markNeedsPaint();
+  }
+
+  /// Where each pinned header was last painted: (row, top, height), top in
+  /// this box's coordinates. Kept for hit testing, which has to find a tap on
+  /// a pinned header rather than on the row scrolled beneath it.
+  final List<(int, double, double)> _stickySlots = <(int, double, double)>[];
+
+  /// Computes where the pinned headers go: stacked from the top, each pushed
+  /// up by the end of its own group so the next header slides it away rather
+  /// than overlapping it.
+  void _layoutSticky() {
+    _stickySlots.clear();
+    final chain = _stickyChain;
+    final end = _groupEnd;
+    if (chain == null || end == null || rowCount == 0) return;
+    final first = _rowMetrics.clampedRowAt(_verticalOffset);
+    var y = 0.0;
+    for (final row in chain(first)) {
+      if (row < 0 || row >= rowCount) continue;
+      final height = _rowMetrics.heightOf(row);
+      final natural = _rowMetrics.offsetOf(row) - _verticalOffset;
+      // A header still in its own place needs no pinning — and every header
+      // below it in the chain is in its place too.
+      if (natural >= y) break;
+      final groupEnd = end(row).clamp(0, rowCount);
+      final limit = _rowMetrics.offsetOf(groupEnd) - _verticalOffset - height;
+      final top = math.min(y, limit);
+      _stickySlots.add((row, top, height));
+      y = top + height;
+    }
+  }
+
+  /// The pinned header row under a local vertical offset, or -1.
+  int stickyRowAtOffset(double dy) {
+    for (final (row, top, height) in _stickySlots.reversed) {
+      if (dy >= top && dy < top + height) return row;
+    }
+    return -1;
+  }
+
+  void _paintSticky(Canvas canvas, Offset offset) {
+    if (_stickySlots.isEmpty) return;
+    final padding = _theme.effectiveCellPadding;
+    final background = Paint();
+    final rule = Paint()
+      ..color = _theme.border
+      ..strokeWidth = _theme.dividerThickness;
+    for (final (row, top, height) in _stickySlots) {
+      final y = offset.dy + top;
+      background.color = _rowColor?.call(row) ?? _theme.rowBackground;
+      // Opaque, whatever the header colour: the rows are scrolling under it.
+      canvas.drawRect(
+        Rect.fromLTWH(offset.dx, y, size.width, height),
+        Paint()..color = _theme.rowBackground,
+      );
+      canvas.drawRect(
+        Rect.fromLTWH(offset.dx, y, size.width, height),
+        background,
+      );
+      final span = _spanAt(row, 0);
+      _paintCell(canvas, offset, row, 0, span, padding, topOverride: y);
+      canvas.drawLine(
+        Offset(offset.dx, y + height),
+        Offset(offset.dx + size.width, y + height),
+        rule,
+      );
+    }
   }
 
   void Function(int row, int column)? _onCellActivate;
@@ -599,7 +811,20 @@ class RenderFitGridSection extends RenderBox
       final columnIndex = data.columnIndex;
       final rowIndex = data.rowIndex;
 
-      if (columnIndex < 0 || columnIndex >= _columnLayout.length) {
+      if (columnIndex == FitGridCellParentData.fullRow) {
+        final inRange = rowIndex >= 0 && rowIndex < rowCount;
+        child.layout(
+          BoxConstraints.tightFor(
+            width: size.width,
+            height: inRange ? _rowMetrics.heightOf(rowIndex) : 0.0,
+          ),
+          parentUsesSize: false,
+        );
+        data.offset = Offset(
+          0,
+          (inRange ? _rowMetrics.offsetOf(rowIndex) : 0.0) - _verticalOffset,
+        );
+      } else if (columnIndex < 0 || columnIndex >= _columnLayout.length) {
         // Stale tag — lay out degenerately rather than throwing. A child that
         // cannot be placed must still be laid out, or the semantics and paint
         // phases will trip over an unlaid-out render object.
@@ -622,6 +847,7 @@ class RenderFitGridSection extends RenderBox
       }
       child = data.nextSibling;
     }
+    _layoutSticky();
   }
 
   // --------------------------------------------------------- band geometry
@@ -751,15 +977,62 @@ class RenderFitGridSection extends RenderBox
     }
 
     _paintSpans(canvas, offset);
+    _paintSticky(canvas, offset);
+    _paintDropLine(canvas, offset);
+    _paintFill(canvas, offset);
     canvas.restore();
     _pruneCache();
     _paintChildren(context, offset);
+  }
+
+  void _paintFill(Canvas canvas, Offset offset) {
+    final (r0, r1, c0, c1) = _fillPreview;
+    if (r0 >= 0 && c0 >= 0 && r1 < rowCount && c1 < _columnLayout.length) {
+      final a = _screenLeft(c0);
+      final b = _screenLeft(c1);
+      final rect = Rect.fromLTRB(
+        offset.dx + math.min(a, b),
+        offset.dy + _rowMetrics.offsetOf(r0) - _verticalOffset,
+        offset.dx +
+            math.max(
+              a + _columnLayout.widths[c0],
+              b + _columnLayout.widths[c1],
+            ),
+        offset.dy + _rowMetrics.offsetOf(r1 + 1) - _verticalOffset,
+      );
+      canvas.drawRect(
+        rect.deflate(0.5),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..color = _theme.focusOutline.withValues(alpha: 0.8),
+      );
+    }
+    final handle = fillHandleRect;
+    if (handle == null) return;
+    final box = handle.shift(offset);
+    // A ring in the row colour around it, so it reads against the outline
+    // it sits on and against a selected row alike.
+    canvas
+      ..drawRect(box.inflate(1), Paint()..color = _theme.rowBackground)
+      ..drawRect(box, Paint()..color = _theme.focusOutline);
+  }
+
+  void _paintDropLine(Canvas canvas, Offset offset) {
+    if (_dropLine < 0 || _dropLine > rowCount) return;
+    final y = offset.dy + _rowMetrics.offsetOf(_dropLine) - _verticalOffset;
+    final stroke = _theme.focusRingWidth;
+    canvas.drawRect(
+      Rect.fromLTWH(offset.dx, y - stroke / 2, size.width, stroke),
+      Paint()..color = _theme.focusOutline,
+    );
   }
 
   /// Which band a column is painted in: 0 leading pinned, 1 scrolling, 2
   /// trailing pinned. Null for a stale column index.
   int? _bandOf(int columnIndex) {
     final layout = _columnLayout;
+    if (columnIndex == FitGridCellParentData.fullRow) return 3;
     if (columnIndex < 0 || columnIndex >= layout.length) return null;
     if (columnIndex < layout.leadingFrozenCount) return 0;
     if (columnIndex >= layout.trailingFrozenStart) return 2;
@@ -770,6 +1043,7 @@ class RenderFitGridSection extends RenderBox
   Rect _bandLocalRect(int band) {
     final layout = _columnLayout;
     return switch (band) {
+      3 => Offset.zero & size,
       0 => _bandRect(0, layout.leadingFrozenWidth, Offset.zero),
       2 => _bandRect(
         size.width - layout.trailingFrozenWidth,
@@ -786,7 +1060,7 @@ class RenderFitGridSection extends RenderBox
 
   final List<LayerHandle<ClipRectLayer>> _bandClips =
       List<LayerHandle<ClipRectLayer>>.generate(
-        3,
+        4,
         (_) => LayerHandle<ClipRectLayer>(),
       );
 
@@ -795,9 +1069,10 @@ class RenderFitGridSection extends RenderBox
   /// a pinned column disappears beneath it instead of drawing over it, and a
   /// row scrolled half off the top is cut at the edge.
   ///
-  /// At most three clips per frame, one per band, however many children.
+  /// At most four clips per frame, one per band and one for the full-width
+  /// children, however many children there are.
   void _paintChildren(PaintingContext context, Offset offset) {
-    for (var band = 0; band < 3; band++) {
+    for (var band = 0; band < 4; band++) {
       var any = false;
       var child = firstChild;
       while (child != null && !any) {
@@ -842,10 +1117,63 @@ class RenderFitGridSection extends RenderBox
       ..save()
       ..clipRect(band);
     _paintRowBackgrounds(canvas, offset, band);
+    _paintRange(canvas, offset, firstColumn, lastColumn, fill: true);
     _paintRules(canvas, offset, band, firstColumn, lastColumn);
     _paintText(canvas, offset, firstColumn, lastColumn);
+    _paintRange(canvas, offset, firstColumn, lastColumn, fill: false);
     _paintFocusRing(canvas, offset, firstColumn, lastColumn);
     canvas.restore();
+  }
+
+  /// The part of the selected range inside one band: a wash under the text on
+  /// the first call, and an outline over it on the second.
+  ///
+  /// One rectangle per band rather than one per cell, because a range is
+  /// contiguous within a band whatever its size.
+  void _paintRange(
+    Canvas canvas,
+    Offset offset,
+    int firstColumn,
+    int lastColumn, {
+    required bool fill,
+  }) {
+    final (r0, r1, c0, c1) = _selectedRange;
+    if (r0 < 0) return;
+    final from = math.max(c0, firstColumn);
+    final to = math.min(c1, lastColumn - 1);
+    if (from > to) return;
+    final top = math.max(r0, _firstVisibleRow);
+    final bottom = math.min(r1, _lastVisibleRow - 1);
+    if (top > bottom) return;
+
+    final leftA = _screenLeft(from);
+    final leftB = _screenLeft(to);
+    final left = math.min(leftA, leftB);
+    final right = math.max(
+      leftA + _columnLayout.widths[from],
+      leftB + _columnLayout.widths[to],
+    );
+    final rect = Rect.fromLTRB(
+      offset.dx + left,
+      offset.dy + _rowMetrics.offsetOf(top) - _verticalOffset,
+      offset.dx + right,
+      offset.dy + _rowMetrics.offsetOf(bottom + 1) - _verticalOffset,
+    );
+    if (fill) {
+      canvas.drawRect(
+        rect,
+        Paint()..color = _theme.effectiveRangeSelectionBackground,
+      );
+      return;
+    }
+    final stroke = _theme.focusRingWidth / 2;
+    canvas.drawRect(
+      rect.deflate(stroke / 2),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..color = _theme.focusOutline,
+    );
   }
 
   void _paintRowBackgrounds(Canvas canvas, Offset offset, Rect band) {
@@ -980,6 +1308,7 @@ class RenderFitGridSection extends RenderBox
     final padding = _theme.effectiveCellPadding;
 
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
+      if (_fullRow(row)) continue;
       for (var column = firstColumn; column < lastColumn; column++) {
         final span = _spanAt(row, column);
         // A merged cell can reach past the band it starts in — a group header
@@ -1004,6 +1333,7 @@ class RenderFitGridSection extends RenderBox
     final padding = _theme.effectiveCellPadding;
 
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
+      if (_fullRow(row)) continue;
       for (var column = 0; column < _columnLayout.length; column++) {
         final span = _spanAt(row, column);
         if (span <= 1) continue;
@@ -1020,12 +1350,14 @@ class RenderFitGridSection extends RenderBox
     int row,
     int column,
     int span,
-    EdgeInsets padding,
-  ) {
+    EdgeInsets padding, {
+    double? topOverride,
+  }) {
     if (_paintColumns[column].isWidgetColumn) return;
     if (row == _editingRow && column == _editingColumn) return;
 
-    final top = offset.dy + _rowMetrics.offsetOf(row) - _verticalOffset;
+    final top =
+        topOverride ?? offset.dy + _rowMetrics.offsetOf(row) - _verticalOffset;
     final height = _rowMetrics.heightOf(row);
 
     final width = span == 1
@@ -1037,7 +1369,21 @@ class RenderFitGridSection extends RenderBox
     final availableHeight = height - padding.vertical;
     if (availableHeight <= 0) return;
 
-    final cell = _cellFor(row, column, available, availableHeight);
+    final spec = _cellSpec(row, column);
+    if (spec.placeholder) {
+      return _paintPlaceholder(
+        canvas,
+        offset,
+        row,
+        column,
+        top,
+        height,
+        available,
+        padding,
+      );
+    }
+
+    final cell = _cellFor(spec, available, availableHeight);
     final leadingEdge = offset.dx + _screenLeft(column);
     // Under RTL a span grows leftwards from its own column, so its box starts
     // where the last covered column does.
@@ -1061,6 +1407,21 @@ class RenderFitGridSection extends RenderBox
     final textLeft = rtl ? contentLeft : contentLeft + cell.iconAdvance;
     final origin = Offset(textLeft, top + (height - cell.painter.height) / 2);
     final cellRect = Rect.fromLTWH(left, top, width, height);
+
+    final visual = spec.visual;
+    if (visual != null) {
+      _paintVisual(
+        canvas,
+        visual,
+        Rect.fromLTRB(
+          cellRect.left + padding.left,
+          cellRect.top + padding.top,
+          cellRect.right - padding.right,
+          cellRect.bottom - padding.bottom,
+        ),
+        hasText: spec.text.isNotEmpty,
+      );
+    }
 
     // A cell that still does not fit — one line taller than the whole row, say
     // — is clipped to its own box rather than allowed to paint over its
@@ -1097,6 +1458,142 @@ class RenderFitGridSection extends RenderBox
     }
     if (needsClip) canvas.restore();
     _byCell[_cellKey(row, column)] = cell;
+  }
+
+  /// A chart in a cell's content box.
+  ///
+  /// Bars and tracks grow from the leading edge, so under RTL they grow from
+  /// the right. A sparkline does not mirror: its axis is time, and time runs
+  /// left to right on a chart whatever the script around it.
+  void _paintVisual(
+    Canvas canvas,
+    FitGridCellVisualSpec visual,
+    Rect box, {
+    required bool hasText,
+  }) {
+    if (box.width <= 0 || box.height <= 0) return;
+    final rtl = _textDirection == TextDirection.rtl;
+    final base =
+        visual.color ??
+        (visual.negative
+            ? _theme.effectiveChartNegativeColor
+            : _theme.effectiveChartColor);
+
+    Rect span(double from, double to, double top, double height) {
+      final a = box.left + box.width * (rtl ? 1 - to : from);
+      final b = box.left + box.width * (rtl ? 1 - from : to);
+      return Rect.fromLTRB(a, top, b, top + height);
+    }
+
+    switch (visual.kind) {
+      case FitGridVisualKind.bar:
+        // Translucent, so the value painted over it stays readable.
+        final rect = span(visual.from, visual.to, box.top, box.height);
+        if (rect.width <= 0) return;
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+          Paint()..color = base.withValues(alpha: base.a * 0.35),
+        );
+      case FitGridVisualKind.progress:
+        // With text, a slim track along the bottom leaves the text its line;
+        // alone, a thicker one sits in the middle.
+        final thickness = math.min(box.height, hasText ? 4.0 : 8.0);
+        final top = hasText
+            ? box.bottom - thickness
+            : box.top + (box.height - thickness) / 2;
+        final radius = Radius.circular(thickness / 2);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(span(0, 1, top, thickness), radius),
+          Paint()..color = base.withValues(alpha: base.a * 0.18),
+        );
+        if (visual.to > 0) {
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(span(0, visual.to, top, thickness), radius),
+            Paint()..color = base,
+          );
+        }
+      case FitGridVisualKind.sparkline:
+        final points = visual.points;
+        if (points.length < 2) return;
+        final step = box.width / (points.length - 1);
+        final path = Path();
+        for (var i = 0; i < points.length; i++) {
+          final x = box.left + step * i;
+          final y = box.bottom - points[i] * box.height;
+          if (i == 0) {
+            path.moveTo(x, y);
+          } else {
+            path.lineTo(x, y);
+          }
+        }
+        if (visual.filled) {
+          final area = Path.from(path)
+            ..lineTo(box.right, box.bottom)
+            ..lineTo(box.left, box.bottom)
+            ..close();
+          canvas.drawPath(
+            area,
+            Paint()..color = base.withValues(alpha: base.a * 0.15),
+          );
+        }
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = base
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5
+            ..strokeJoin = StrokeJoin.round
+            ..strokeCap = StrokeCap.round,
+        );
+        // The last point is the one people read, so it gets a dot.
+        canvas.drawCircle(
+          Offset(box.right, box.bottom - points.last * box.height),
+          2.5,
+          Paint()..color = base,
+        );
+    }
+  }
+
+  /// A skeleton bar where content is on its way.
+  ///
+  /// Its length varies with the row and column, deterministically, so a block
+  /// of loading rows looks like text of uneven length rather than a ruled
+  /// grid — and does not flicker from one frame to the next.
+  void _paintPlaceholder(
+    Canvas canvas,
+    Offset offset,
+    int row,
+    int column,
+    double top,
+    double height,
+    double available,
+    EdgeInsets padding,
+  ) {
+    final fraction = 0.45 + ((row * 7 + column * 13) % 5) * 0.1;
+    final width = available * fraction;
+    final barHeight = math.min(
+      height - padding.vertical,
+      (_theme.cellTextStyle.fontSize ?? 14) * 0.8,
+    );
+    if (width <= 0 || barHeight <= 0) return;
+    final leadingEdge = offset.dx + _screenLeft(column) + padding.left;
+    final left = _textDirection == TextDirection.ltr
+        ? leadingEdge
+        : offset.dx +
+              _screenLeft(column) +
+              _columnLayout.widths[column] -
+              padding.right -
+              width;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(left, top + (height - barHeight) / 2, width, barHeight),
+        Radius.circular(barHeight / 2),
+      ),
+      Paint()
+        ..color = _theme.placeholderForeground.withValues(
+          alpha: _theme.placeholderForeground.a * 0.25,
+        ),
+    );
   }
 
   /// A wash behind the characters a search matched.
@@ -1173,8 +1670,11 @@ class RenderFitGridSection extends RenderBox
   /// `FitGridRowHeight.contentSized(max: ...)` — or a wrapping column under a
   /// fixed row height — lays its text out at full height and paints it straight
   /// over the rows above and below.
-  _CachedCell _cellFor(int row, int column, double maxWidth, double maxHeight) {
-    final spec = _cellSpec(row, column);
+  _CachedCell _cellFor(
+    FitGridCellSpec spec,
+    double maxWidth,
+    double maxHeight,
+  ) {
     final key = Object.hash(spec, maxWidth, maxHeight);
     final existing = _cells[key];
 
@@ -1339,6 +1839,7 @@ class RenderFitGridSection extends RenderBox
     final layout = _columnLayout;
 
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
+      if (_fullRow(row)) continue;
       final cells = <SemanticsNode>[];
       final rowTop = _rowMetrics.offsetOf(row) - _verticalOffset;
       final rowHeight = _rowMetrics.heightOf(row);
@@ -1366,6 +1867,7 @@ class RenderFitGridSection extends RenderBox
         if (row == _focusedRow && column == _focusedColumn) {
           cellConfig.isFocused = true;
         }
+        if (_inRange(row, column)) cellConfig.isSelected = true;
         cellNode
           ..rect = Rect.fromLTWH(left, 0, width, rowHeight)
           ..updateWith(config: cellConfig, childrenInInversePaintOrder: null);

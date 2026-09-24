@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
 
+import 'screens/charts.dart';
+import 'screens/columns_and_filters.dart';
 import 'screens/controller_patterns.dart';
+import 'screens/detail_rows.dart';
 import 'screens/formatting.dart';
 import 'screens/grouping.dart';
+import 'screens/infinite_scroll.dart';
 import 'screens/lazy_loading.dart';
 import 'screens/pagination.dart';
+import 'screens/pivot_export.dart';
 import 'screens/playground.dart';
+import 'screens/reorderable_rows.dart';
 import 'screens/sizing.dart';
+import 'screens/spreadsheet.dart';
 import 'screens/two_designs.dart';
 import 'screens/widget_cells.dart';
 import 'shared/demo_page.dart';
@@ -119,6 +126,72 @@ final List<(String, List<Example>)> exampleSections = [
             'proves the page does not rebuild.',
         icon: Icons.tune,
         builder: (_) => const ControllerPatternsScreen(),
+      ),
+    ],
+  ),
+  (
+    'Working like a spreadsheet',
+    [
+      Example(
+        title: 'Spreadsheet editing',
+        subtitle:
+            'Select a block of cells, copy, paste, drag the fill handle, and '
+            'undo any of it. Shift+click headers to sort by several columns.',
+        icon: Icons.grid_on,
+        builder: (_) => const SpreadsheetScreen(),
+      ),
+      Example(
+        title: 'Columns, filters & layouts',
+        subtitle:
+            'The column menu, typed filters and checklists, the column chooser, '
+            'header bands, and the whole layout saved as JSON.',
+        icon: Icons.filter_alt_outlined,
+        builder: (_) => const ColumnsAndFiltersScreen(),
+      ),
+      Example(
+        title: 'Pivot & export',
+        subtitle:
+            'Summarise 20,000 rows by department and year, then copy CSV or '
+            'build an Excel workbook.',
+        icon: Icons.pivot_table_chart_outlined,
+        builder: (_) => const PivotExportScreen(),
+      ),
+    ],
+  ),
+  (
+    'Rows that do more',
+    [
+      Example(
+        title: 'Detail rows',
+        subtitle:
+            'Open a panel under any row — here, a nested grid of pay reviews '
+            'that follows its row through a sort.',
+        icon: Icons.unfold_more,
+        builder: (_) => const DetailRowsScreen(),
+      ),
+      Example(
+        title: 'Infinite scroll',
+        subtitle:
+            'A slow, occasionally failing feed that loads as you near the end, '
+            'with skeleton rows while it works.',
+        icon: Icons.all_inclusive,
+        builder: (_) => const InfiniteScrollScreen(),
+      ),
+      Example(
+        title: 'Reorderable rows',
+        subtitle:
+            'A backlog you rank by dragging rows by their handles, or with '
+            'Alt+arrow keys.',
+        icon: Icons.drag_indicator,
+        builder: (_) => const ReorderableRowsScreen(),
+      ),
+      Example(
+        title: 'Charts in cells',
+        subtitle:
+            'Data bars, progress tracks and sparklines over 5,000 rows, '
+            'painted rather than built.',
+        icon: Icons.show_chart,
+        builder: (_) => const ChartsScreen(),
       ),
     ],
   ),

@@ -71,6 +71,7 @@ class FitGridColumnSizer {
     TextScaler textScaler = TextScaler.noScaling,
     Map<String, double> overrides = const <String, double>{},
     bool stretchToFill = true,
+    double headerExtra = 0.0,
   }) {
     // Already partitioned when the caller came through the controller; doing
     // it again is O(columns) and keeps a direct caller honest.
@@ -98,8 +99,13 @@ class FitGridColumnSizer {
     _isComplete = true;
     var budget = measurementBudget;
 
+    // [headerExtra] is room for header chrome every column carries — the
+    // column menu button — so a column sized to its label still has space
+    // to show it.
     final headerChrome =
-        theme.effectiveHeaderPadding.horizontal + theme.dividerThickness;
+        theme.effectiveHeaderPadding.horizontal +
+        theme.dividerThickness +
+        headerExtra;
     final cellChrome =
         theme.effectiveCellPadding.horizontal + theme.dividerThickness;
 
