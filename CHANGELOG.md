@@ -79,6 +79,9 @@ behaves as it did, and the package still has no dependency beyond Flutter.
   the row's selection and the arrow keys moved the grid's focus. Grid shortcuts
   now act only while the grid itself holds focus.
 - Each cell's spec is resolved once per paint rather than twice.
+- Footer totals are no longer cut off: columns size to fit their footer total
+  as well as their header and cells, and the footer lays its label and value
+  out as one line instead of giving each half the room.
 
 ### Other
 

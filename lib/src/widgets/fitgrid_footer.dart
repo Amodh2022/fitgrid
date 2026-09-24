@@ -152,23 +152,24 @@ class FitGridFooter<T> extends StatelessWidget {
           FitGridAlignment.end => MainAxisAlignment.end,
         },
         children: [
-          if (label != null) ...[
-            Flexible(
-              child: Text(
-                label,
-                style: theme.headerTextStyle.copyWith(
-                  color: theme.placeholderForeground,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(width: 6),
-          ],
+          // One paragraph, label and value together: it takes the width it
+          // needs and ellipsizes only at the end, only when the column really
+          // is too narrow. Two Flexibles would split the room in half and cut
+          // a long total off while space sat unused beside a short label.
           Flexible(
-            child: Text(
-              value,
-              style: theme.headerTextStyle,
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  if (label != null)
+                    TextSpan(
+                      text: '$label  ',
+                      style: theme.headerTextStyle.copyWith(
+                        color: theme.placeholderForeground,
+                      ),
+                    ),
+                  TextSpan(text: value, style: theme.headerTextStyle),
+                ],
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),

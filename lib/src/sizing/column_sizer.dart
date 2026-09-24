@@ -72,6 +72,8 @@ class FitGridColumnSizer {
     Map<String, double> overrides = const <String, double>{},
     bool stretchToFill = true,
     double headerExtra = 0.0,
+    Map<String, (String?, String)> footerTexts =
+        const <String, (String?, String)>{},
   }) {
     // Already partitioned when the caller came through the controller; doing
     // it again is O(columns) and keeps a direct caller honest.
@@ -134,6 +136,7 @@ class FitGridColumnSizer {
               headerChrome,
               textDirection,
               textScaler,
+              footerTexts[column.id],
             ),
           );
 
@@ -148,6 +151,7 @@ class FitGridColumnSizer {
               headerChrome,
               textDirection,
               textScaler,
+              footerTexts[column.id],
             ),
           );
           flexIndices.add(i);
@@ -159,6 +163,7 @@ class FitGridColumnSizer {
             headerChrome,
             textDirection,
             textScaler,
+            footerTexts[column.id],
           );
 
           // A widget cell's width is whatever the widget wants, which text
@@ -232,13 +237,16 @@ class FitGridColumnSizer {
   }
 
   /// Width this column needs for its own header, including sort affordance.
+  /// Width this column needs for its own header — and for its footer total,
+  /// when it has one, so a sum wider than every cell above it is not cut off.
   double _headerWidth<T>(
     FitGridColumn<T> column,
     FitGridThemeData theme,
     double chrome,
     TextDirection textDirection,
-    TextScaler textScaler,
-  ) {
+    TextScaler textScaler, [
+    (String?, String)? footer,
+  ]) {
     final text = _measure(
       column.label,
       theme.headerTextStyle,
@@ -246,7 +254,22 @@ class FitGridColumnSizer {
       textScaler,
     );
     final sortAffordance = column.sortable ? theme.sortIconSize + 4 : 0.0;
-    return text + chrome + sortAffordance;
+    final header = text + chrome + sortAffordance;
+    if (footer == null) return header;
+    final (label, value) = footer;
+    // Measured as the footer paints it: one line, the label and two spaces
+    // before the value, in the header style (only the colours differ), inside
+    // the header padding.
+    final footerWidth =
+        _measure(
+          label == null ? value : '$label  $value',
+          theme.headerTextStyle,
+          textDirection,
+          textScaler,
+        ) +
+        theme.effectiveHeaderPadding.horizontal +
+        theme.dividerThickness;
+    return math.max(header, footerWidth);
   }
 
   /// Hands unused horizontal space to the columns that asked for it.

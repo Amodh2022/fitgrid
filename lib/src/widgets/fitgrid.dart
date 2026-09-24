@@ -3464,6 +3464,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       Object.hashAll(overrides.entries.map((e) => Object.hash(e.key, e.value))),
       widget.stretchColumnsToFill,
       _headerExtra(theme),
+      widget.showFooter,
     );
     final cached = _layout;
     if (cached != null && _layoutKey == key) return cached;
@@ -3478,6 +3479,15 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       overrides: overrides,
       stretchToFill: widget.stretchColumnsToFill,
       headerExtra: _headerExtra(theme),
+      // Only when the cache missed: an aggregate is a pass over the rows,
+      // and the key above already changes whenever the rows do.
+      footerTexts: widget.showFooter
+          ? <String, (String?, String)>{
+              for (final column in columns)
+                if (column.aggregate != null)
+                  column.id: (column.footerLabel, column.aggregate!(rows)),
+            }
+          : const <String, (String?, String)>{},
     );
     _layout = layout;
     // A measurement pass that ran out of budget leaves the widths provisional,
