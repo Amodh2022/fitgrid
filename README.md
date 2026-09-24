@@ -3,6 +3,8 @@
 A Flutter data grid that **measures your content** instead of making you guess
 column widths, and **paints cells** instead of building a widget for each one.
 
+![fitgrid: a data grid with content-sized columns, sorting, selection and footer totals](https://raw.githubusercontent.com/Amodh2022/fitgrid/main/screenshots/overview.png)
+
 ```
       rows   first frame   median scroll frame   painted cells   rows laid out
      1,000       21.0 ms              5.1 ms              94              20

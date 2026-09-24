@@ -72,7 +72,7 @@ class _ReorderableRowsScreenState extends State<ReorderableRowsScreen> {
       final task = tasks.removeAt(from);
       tasks.insert(to, task);
       _tasks = tasks;
-      _lastMove = '"${task.title}" ${from + 1} → ${to + 1}';
+      _lastMove = '"${task.title}" ${from + 1} to ${to + 1}';
     });
   }
 

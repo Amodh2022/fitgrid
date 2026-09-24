@@ -160,7 +160,7 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
                   value: range == null
                       ? 'none'
                       : '${range.rowCount} rows, '
-                            '${range.anchorColumnId} → ${range.extentColumnId}',
+                            '${range.anchorColumnId} to ${range.extentColumnId}',
                 );
               },
             ),

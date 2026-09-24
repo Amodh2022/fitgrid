@@ -162,7 +162,7 @@ class _GroupingScreenState extends State<GroupingScreen> {
               ),
               ButtonSegment(
                 value: _Mode.byDepartmentAndRole,
-                label: Text('Department → role'),
+                label: Text('Department + role'),
               ),
               ButtonSegment(value: _Mode.tree, label: Text('Org tree')),
             ],

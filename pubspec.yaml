@@ -1,7 +1,8 @@
 name: fitgrid_table
 description: >-
-  A Flutter data grid that measures your content instead of making you guess
-  column widths, and paints cells instead of building a widget for each one.
+  A fast Flutter data table and data grid that measures column widths and paints
+  cells: sorting, filters, cell editing, grouping and xlsx export over a
+  million rows.
 version: 0.1.0
 repository: https://github.com/Amodh2022/fitgrid
 issue_tracker: https://github.com/Amodh2022/fitgrid/issues
@@ -10,8 +11,22 @@ topics:
   - table
   - data-table
   - data-grid
+  - spreadsheet
   - performance
-  - accessibility
+
+screenshots:
+  - description: 'Columns sized to their content, sorting, row selection and footer totals.'
+    path: screenshots/overview.png
+  - description: 'Spreadsheet editing: a cell range with a fill handle, multi-column sort priorities.'
+    path: screenshots/spreadsheet.png
+  - description: 'Header bands, a filtered column, per-column menus and saved layouts.'
+    path: screenshots/filters.png
+  - description: 'Two-level grouping with sticky group headers.'
+    path: screenshots/grouping.png
+  - description: 'Detail rows with nested grids, in dark mode.'
+    path: screenshots/detail.png
+  - description: 'Data bars, progress tracks and sparklines painted in cells.'
+    path: screenshots/charts.png
 
 environment:
   sdk: ^3.9.0
