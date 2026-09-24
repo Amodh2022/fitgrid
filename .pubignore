@@ -1,0 +1,13 @@
+.dart_tool/
+.packages
+build/
+pubspec.lock
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Not part of the package: the website, CI, and launch material.
+site/
+marketing/
+.github/

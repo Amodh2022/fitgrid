@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>fitgrid — a fast Flutter data table and data grid</title>
+  <meta name="description" content="fitgrid is a Flutter data table and data grid that measures column widths from content and paints cells, so it scrolls a million rows smoothly. Sorting, filters, editing, grouping, xlsx export. Free and open source.">
+  <link rel="canonical" href="https://amodh2022.github.io/fitgrid/">
+  <meta property="og:title" content="fitgrid — a fast Flutter data table">
+  <meta property="og:description" content="A Flutter data grid that measures your content and paints cells: a million rows, sorting, filters, editing, grouping, xlsx export, no dependencies.">
+  <meta property="og:image" content="https://amodh2022.github.io/fitgrid/screenshots/overview.png">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareSourceCode",
+    "name": "fitgrid_table",
+    "description": "A Flutter data table and data grid that measures column widths and paints cells.",
+    "codeRepository": "https://github.com/Amodh2022/fitgrid",
+    "programmingLanguage": "Dart",
+    "runtimePlatform": "Flutter",
+    "license": "https://opensource.org/licenses/MIT"
+  }
+  </script>
+  <style>
+    :root { --fg:#0f172a; --muted:#475569; --bg:#ffffff; --card:#f1f5f9; --accent:#2563eb; }
+    @media (prefers-color-scheme: dark) { :root { --fg:#e2e8f0; --muted:#94a3b8; --bg:#0b1120; --card:#1e293b; --accent:#60a5fa; } }
+    * { box-sizing: border-box; }
+    body { margin:0; font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; color:var(--fg); background:var(--bg); }
+    main { max-width:960px; margin:0 auto; padding:32px 16px 64px; }
+    h1 { font-size:2.2rem; line-height:1.2; margin:0 0 12px; }
+    h2 { margin-top:48px; }
+    p.lead { font-size:1.2rem; color:var(--muted); margin-top:0; }
+    a { color:var(--accent); }
+    .buttons a { display:inline-block; margin:8px 8px 0 0; padding:10px 18px; border-radius:8px; background:var(--accent); color:#fff; text-decoration:none; font-weight:600; }
+    .buttons a.secondary { background:var(--card); color:var(--fg); }
+    img { width:100%; height:auto; border-radius:12px; border:1px solid var(--card); }
+    pre { background:var(--card); padding:16px; border-radius:8px; overflow-x:auto; }
+    code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.9em; }
+    ul.features { columns:2; gap:32px; padding-left:18px; }
+    @media (max-width:640px) { ul.features { columns:1; } h1 { font-size:1.7rem; } }
+    table { border-collapse:collapse; width:100%; }
+    th, td { text-align:left; padding:8px; border-bottom:1px solid var(--card); }
+    .gallery { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }
+    .gallery figure { margin:0; }
+    figcaption { color:var(--muted); font-size:.9rem; margin-top:6px; }
+    footer { color:var(--muted); margin-top:64px; font-size:.9rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>fitgrid — a fast Flutter data table</h1>
+  <p class="lead">A Flutter data grid that <strong>measures your content</strong> instead of making you guess column widths, and <strong>paints cells</strong> instead of building a widget for each one. It scrolls a million rows as smoothly as a hundred.</p>
+  <div class="buttons">
+    <a href="demo/">Try the live demo</a>
+    <a class="secondary" href="https://pub.dev/packages/fitgrid_table">pub.dev</a>
+    <a class="secondary" href="https://github.com/Amodh2022/fitgrid">GitHub</a>
+    <a class="secondary" href="choosing-a-flutter-data-table.html">Choosing a Flutter data table</a>
+  </div>
+
+  <p><img src="screenshots/overview.png" alt="fitgrid showing employees with content-sized columns, a sorted salary column, selected rows and a footer total" width="2560" height="1600"></p>
+
+  <h2>Install</h2>
+<pre><code>flutter pub add fitgrid_table</code></pre>
+<pre><code>FitGrid&lt;Employee&gt;(
+  rows: employees,
+  columns: [
+    FitGridColumn(id: 'name', label: 'Name', value: (e) =&gt; e.name, sortable: true),
+    FitGridColumn(id: 'role', label: 'Role', value: (e) =&gt; e.role),
+    FitGridColumn(id: 'salary', label: 'Salary', value: (e) =&gt; '\$${e.salary}',
+        alignment: FitGridAlignment.end),
+  ],
+)</code></pre>
+  <p>No width arithmetic: every column measures its content.</p>
+
+  <h2>Why it is fast</h2>
+  <table>
+    <tr><th>Rows</th><th>First frame</th><th>Median scroll frame</th><th>Rows laid out</th></tr>
+    <tr><td>1,000</td><td>21.0 ms</td><td>5.1 ms</td><td>20</td></tr>
+    <tr><td>100,000</td><td>28.7 ms</td><td>3.3 ms</td><td>20</td></tr>
+    <tr><td>1,000,000</td><td>41.6 ms</td><td>2.9 ms</td><td>20</td></tr>
+  </table>
+  <p>A block of cells is one render object with cached text painters, so the work tracks the viewport, never the dataset. Measured by the <a href="https://github.com/Amodh2022/fitgrid/tree/main/benchmark">benchmarks in the repository</a>.</p>
+
+  <h2>Everything a data grid needs</h2>
+  <ul class="features">
+    <li>Content-measured column widths and row heights</li>
+    <li>Multi-column sort</li>
+    <li>Free-text search with highlighting</li>
+    <li>Typed filters with a UI: text, number, date, checklists</li>
+    <li>A column menu and a column chooser</li>
+    <li>Frozen columns at either edge</li>
+    <li>Row selection, checkbox column, full keyboard navigation</li>
+    <li>Inline editing with validation</li>
+    <li>Cell ranges: copy, paste, fill handle, undo and redo</li>
+    <li>Grouping with sticky headers, tree rows</li>
+    <li>Detail rows with any widget, nested grids included</li>
+    <li>Header bands over column groups</li>
+    <li>Row and column drag-to-reorder</li>
+    <li>Pagination with your own pager</li>
+    <li>Infinite scroll with skeleton rows</li>
+    <li>Server-backed rows with a bounded cache</li>
+    <li>Data bars, progress tracks and sparklines in cells</li>
+    <li>Pivot tables</li>
+    <li>CSV, TSV and Excel (xlsx) export — no dependencies</li>
+    <li>Saved and restored layouts</li>
+    <li>A real accessibility tree, right-to-left, light and dark</li>
+    <li>Themed from your Material colour scheme, or fully custom</li>
+  </ul>
+
+  <h2>Screenshots</h2>
+  <div class="gallery">
+    <figure><img src="screenshots/spreadsheet.png" alt="A selected block of cells with a fill handle and two sorted columns showing sort priorities" loading="lazy"><figcaption>Spreadsheet editing: ranges, fill handle, multi-sort.</figcaption></figure>
+    <figure><img src="screenshots/filters.png" alt="Header bands over column groups and a filtered Department column" loading="lazy"><figcaption>Header bands, filters and column menus.</figcaption></figure>
+    <figure><img src="screenshots/grouping.png" alt="Rows grouped by department and role with pinned group headers" loading="lazy"><figcaption>Grouping with sticky headers.</figcaption></figure>
+    <figure><img src="screenshots/detail.png" alt="Expanded detail rows showing nested grids in dark mode" loading="lazy"><figcaption>Detail rows with nested grids.</figcaption></figure>
+    <figure><img src="screenshots/charts.png" alt="Data bars, progress tracks and sparklines inside grid cells" loading="lazy"><figcaption>Charts painted in cells.</figcaption></figure>
+  </div>
+
+  <h2>Learn more</h2>
+  <ul>
+    <li><a href="https://github.com/Amodh2022/fitgrid#readme">The full guide</a> — every feature, theming in depth, the API reference.</li>
+    <li><a href="https://pub.dev/documentation/fitgrid_table/latest/">API documentation</a></li>
+    <li><a href="choosing-a-flutter-data-table.html">Choosing a Flutter data table</a> — how fitgrid compares with DataTable, data_table_2, PlutoGrid and Syncfusion.</li>
+    <li><a href="llms.txt">llms.txt</a> — a summary for AI assistants.</li>
+  </ul>
+
+  <footer>fitgrid_table is free and open source under the MIT license.</footer>
+</main>
+</body>
+</html>

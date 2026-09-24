@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Choosing a Flutter data table: DataTable, data_table_2, PlutoGrid, Syncfusion or fitgrid</title>
+  <meta name="description" content="A practical guide to Flutter data tables and data grids: when Flutter's DataTable is enough, and when to reach for data_table_2, PlutoGrid, Syncfusion DataGrid or fitgrid for large datasets, editing and spreadsheets.">
+  <link rel="canonical" href="https://amodh2022.github.io/fitgrid/choosing-a-flutter-data-table.html">
+  <style>
+    :root { --fg:#0f172a; --muted:#475569; --bg:#fff; --card:#f1f5f9; --accent:#2563eb; }
+    @media (prefers-color-scheme: dark) { :root { --fg:#e2e8f0; --muted:#94a3b8; --bg:#0b1120; --card:#1e293b; --accent:#60a5fa; } }
+    body { margin:0; font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; color:var(--fg); background:var(--bg); }
+    main { max-width:880px; margin:0 auto; padding:32px 16px 64px; }
+    h1 { line-height:1.2; }
+    a { color:var(--accent); }
+    table { border-collapse:collapse; width:100%; font-size:.95rem; display:block; overflow-x:auto; }
+    th, td { text-align:left; padding:8px; border-bottom:1px solid var(--card); vertical-align:top; }
+    .note { color:var(--muted); }
+    pre { background:var(--card); padding:16px; border-radius:8px; overflow-x:auto; }
+  </style>
+</head>
+<body>
+<main>
+  <p><a href="./">← fitgrid</a></p>
+  <h1>Choosing a Flutter data table</h1>
+  <p>Flutter has several good ways to show tabular data. The right one depends
+  mostly on three questions: <em>how many rows</em>, <em>how much users need to
+  do with them</em>, and <em>what licence you can use</em>. This page is written
+  by the author of fitgrid, so it says plainly where another package is the
+  better choice.</p>
+
+  <h2>The short answer</h2>
+  <table>
+    <tr><th>You need</th><th>Reach for</th></tr>
+    <tr><td>A small, read-only table (tens of rows) in a Material app</td><td>Flutter's built-in <code>DataTable</code></td></tr>
+    <tr><td>The <code>DataTable</code> API, plus a fixed header and fixed columns</td><td><a href="https://pub.dev/packages/data_table_2">data_table_2</a></td></tr>
+    <tr><td>You already use the Syncfusion suite, or want commercial support</td><td><a href="https://pub.dev/packages/syncfusion_flutter_datagrid">Syncfusion DataGrid</a></td></tr>
+    <tr><td>Thousands to millions of rows, columns sized to content, spreadsheet-style editing, no dependencies, MIT licence</td><td><a href="https://pub.dev/packages/fitgrid_table">fitgrid</a></td></tr>
+  </table>
+  <p>PlutoGrid is also a feature-rich option that many teams use; compare its
+  current feature list and maintenance activity on
+  <a href="https://pub.dev/packages/pluto_grid">pub.dev</a> against your needs.</p>
+
+  <h2>Flutter's DataTable</h2>
+  <p>Built in, familiar, and fine for small tables. It lays out every row, so it
+  is not meant for large datasets; <code>PaginatedDataTable</code> helps by
+  showing a page at a time. Column widths come from the layout of the cells you
+  build.</p>
+
+  <h2>data_table_2</h2>
+  <p>Described by its author as an in-place substitute for <code>DataTable</code>
+  and <code>PaginatedDataTable</code> with a sticky header, fixed top rows and
+  fixed left columns. A good upgrade when your code already uses the
+  <code>DataTable</code> API.</p>
+
+  <h2>Syncfusion DataGrid</h2>
+  <p>A mature, full-featured grid from a commercial vendor, part of a large
+  component suite. It requires a Syncfusion licence; a free community licence is
+  offered to qualifying individuals and small companies — check their current
+  terms before adopting it.</p>
+
+  <h2>fitgrid</h2>
+  <p>fitgrid is built around two decisions:</p>
+  <ul>
+    <li><strong>Columns measure their content.</strong> Instead of choosing
+    pixel widths, a column sizes itself from its text — with clamps, flex and
+    fixed widths when you want them. Measurement samples the longest candidates,
+    so it stays fast on huge datasets.</li>
+    <li><strong>Cells are painted, not built.</strong> A block of text cells is
+    one render object with cached text painters. The work per frame tracks the
+    viewport, not the dataset: a million rows scroll like a hundred. Real widgets
+    are still available for the cells that need them, built only while visible.</li>
+  </ul>
+  <p>On top of that it has what users expect from a spreadsheet-like grid:
+  multi-column sort, typed filters with a UI, a column menu and chooser, frozen
+  columns, cell ranges with copy, paste, a fill handle and undo, grouping with
+  sticky headers, tree and detail rows, header bands, infinite scroll,
+  server-backed rows, charts in cells, pivots, CSV/TSV/xlsx export, saved
+  layouts, a real accessibility tree and right-to-left — with no dependency
+  beyond Flutter.</p>
+  <pre><code>flutter pub add fitgrid_table</code></pre>
+  <p>See the <a href="demo/">live demo</a> and the
+  <a href="https://github.com/Amodh2022/fitgrid#readme">full guide</a>.</p>
+
+  <h2>What fitgrid does not do</h2>
+  <ul>
+    <li>It is not a drop-in replacement for the <code>DataTable</code> API.</li>
+    <li><code>find.text</code> cannot see painted cells in widget tests; the
+    package ships <code>testing.dart</code> helpers instead.</li>
+    <li>There is no drag-and-drop pivot designer yet — pivots are built in code.</li>
+  </ul>
+
+  <p class="note">Package details change; check each package's pub.dev page for
+  its current features and licence.</p>
+</main>
+</body>
+</html>
