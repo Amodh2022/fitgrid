@@ -1209,47 +1209,124 @@ class RenderFitGridSection extends RenderBox
     int firstColumn,
     int lastColumn,
   ) {
-    final rowRules = _lastVisibleRow - _firstVisibleRow;
-    final columnRules = math.max(0, lastColumn - firstColumn);
-    final segments = rowRules + columnRules;
-    if (segments == 0) return;
+    final dash = _theme.rowDividerDash;
+    final dashed =
+        dash != null &&
+        dash.length >= 2 &&
+        dash.fold<double>(0, (a, b) => a + b) > 0;
+    final tickExtent = _theme.columnDividerExtent;
+    final rowCountInWindow = _lastVisibleRow - _firstVisibleRow;
 
-    final needed = segments * 4;
+    // Row rules, solid or dashed.
+    var rowSegments = rowCountInWindow;
+    if (dashed) {
+      final period = dash.fold<double>(0, (a, b) => a + b);
+      // An upper bound: every period touching the band, one more for the dash
+      // cut by its leading edge, at most half the pattern's entries dashes.
+      rowSegments *=
+          ((band.width / period).ceil() + 1) * ((dash.length + 1) ~/ 2);
+    }
+    // Column rules: one full-height line per column, or a tick per row.
+    var columnSegments = 0;
+    for (var column = firstColumn; column < lastColumn; column++) {
+      if (column == _columnLayout.length - 1) continue;
+      columnSegments += tickExtent == null ? 1 : rowCountInWindow;
+    }
+    // Ticks take the column colour and so need a draw of their own; full-height
+    // column rules share the row rules' call, as they always have.
+    final sharedCall = tickExtent == null;
+    final segments = rowSegments + (sharedCall ? columnSegments : 0);
+    if (segments == 0 && columnSegments == 0) return;
+
+    final needed = math.max(segments, columnSegments) * 4;
     var buffer = _rulePoints;
     if (buffer == null || buffer.length < needed) {
       buffer = _rulePoints = Float32List(needed);
     }
 
+    void draw(int count, Color color) {
+      if (count == 0) return;
+      canvas.drawRawPoints(
+        PointMode.lines,
+        count == buffer!.length
+            ? buffer
+            : Float32List.sublistView(buffer, 0, count),
+        Paint()
+          ..color = color
+          ..strokeWidth = _theme.dividerThickness,
+      );
+    }
+
     var i = 0;
     for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
       final y = offset.dy + _rowMetrics.offsetOf(row + 1) - _verticalOffset;
-      buffer[i++] = band.left;
-      buffer[i++] = y;
-      buffer[i++] = band.right;
-      buffer[i++] = y;
+      if (!dashed) {
+        buffer[i++] = band.left;
+        buffer[i++] = y;
+        buffer[i++] = band.right;
+        buffer[i++] = y;
+        continue;
+      }
+      // Dashes are laid from the section's own left edge, not the band's, so a
+      // pinned band and the scrolling band beside it keep one rhythm.
+      var x = offset.dx;
+      var k = 0;
+      while (x < band.right) {
+        final length = dash[k % dash.length];
+        if (k.isEven) {
+          final from = math.max(x, band.left);
+          final to = math.min(x + length, band.right);
+          if (to > from) {
+            buffer[i++] = from;
+            buffer[i++] = y;
+            buffer[i++] = to;
+            buffer[i++] = y;
+          }
+        }
+        x += length;
+        k++;
+      }
     }
 
     // The trailing rule of the last column in a band is drawn too, unless it is
     // the very last column of the grid: it is the seam between the band and
     // whatever sits beside it, and without it a pinned band floats.
-    for (var column = firstColumn; column < lastColumn; column++) {
-      if (column == _columnLayout.length - 1) continue;
-      final width = _columnLayout.widths[column];
-      final left = offset.dx + _screenLeft(column);
-      final x = _textDirection == TextDirection.ltr ? left + width : left;
-      buffer[i++] = x;
-      buffer[i++] = band.top;
-      buffer[i++] = x;
-      buffer[i++] = band.bottom;
+    void columnRules() {
+      for (var column = firstColumn; column < lastColumn; column++) {
+        if (column == _columnLayout.length - 1) continue;
+        final width = _columnLayout.widths[column];
+        final left = offset.dx + _screenLeft(column);
+        final x = _textDirection == TextDirection.ltr ? left + width : left;
+        if (tickExtent == null) {
+          buffer![i++] = x;
+          buffer[i++] = band.top;
+          buffer[i++] = x;
+          buffer[i++] = band.bottom;
+          continue;
+        }
+        for (var row = _firstVisibleRow; row < _lastVisibleRow; row++) {
+          if (_fullRow(row)) continue;
+          final top = offset.dy + _rowMetrics.offsetOf(row) - _verticalOffset;
+          final height = _rowMetrics.heightOf(row);
+          final extent = math.min(tickExtent, height);
+          final y0 = top + (height - extent) / 2;
+          buffer![i++] = x;
+          buffer[i++] = y0;
+          buffer[i++] = x;
+          buffer[i++] = y0 + extent;
+        }
+      }
     }
 
-    canvas.drawRawPoints(
-      PointMode.lines,
-      i == buffer.length ? buffer : Float32List.sublistView(buffer, 0, i),
-      Paint()
-        ..color = _theme.rowDivider
-        ..strokeWidth = _theme.dividerThickness,
-    );
+    if (sharedCall) {
+      columnRules();
+      draw(i, _theme.rowDivider);
+      return;
+    }
+    draw(i, _theme.rowDivider);
+    i = 0;
+    columnRules();
+    draw(i, _theme.columnDivider);
   }
 
   /// The seam where a pinned band meets the scrolling one.

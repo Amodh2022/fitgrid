@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../model/enums.dart';
@@ -72,6 +73,9 @@ class FitGridThemeData {
     this.detailBackground,
     this.fillHandleSize = 7.0,
     this.rowDragHandleWidth = 32.0,
+    this.rowDividerDash,
+    this.columnDividerExtent,
+    this.headerDividerExtent,
   });
 
   /// A grid theme derived from the ambient Material theme. This is what a user
@@ -296,6 +300,19 @@ class FitGridThemeData {
   /// Width of the drag column added by `FitGrid.reorderableRows`.
   final double rowDragHandleWidth;
 
+  /// Draws the row rules dashed: alternating dash and gap lengths, such as
+  /// `[3, 2]`. Null draws them solid.
+  final List<double>? rowDividerDash;
+
+  /// Length of the column rules in the body, centred in each row — short
+  /// ticks between cells rather than lines down the whole grid. Null draws
+  /// them full height. The ticks take [columnDivider]'s colour.
+  final double? columnDividerExtent;
+
+  /// Length of the dividers between header cells, centred vertically. Null
+  /// draws them full height.
+  final double? headerDividerExtent;
+
   EdgeInsets get effectiveCellPadding =>
       cellPadding ??
       switch (density) {
@@ -397,6 +414,9 @@ class FitGridThemeData {
     Color? detailBackground,
     double? fillHandleSize,
     double? rowDragHandleWidth,
+    List<double>? rowDividerDash,
+    double? columnDividerExtent,
+    double? headerDividerExtent,
   }) {
     return FitGridThemeData(
       headerBackground: headerBackground ?? this.headerBackground,
@@ -464,6 +484,9 @@ class FitGridThemeData {
       detailBackground: detailBackground ?? this.detailBackground,
       fillHandleSize: fillHandleSize ?? this.fillHandleSize,
       rowDragHandleWidth: rowDragHandleWidth ?? this.rowDragHandleWidth,
+      rowDividerDash: rowDividerDash ?? this.rowDividerDash,
+      columnDividerExtent: columnDividerExtent ?? this.columnDividerExtent,
+      headerDividerExtent: headerDividerExtent ?? this.headerDividerExtent,
     );
   }
 
@@ -529,7 +552,10 @@ class FitGridThemeData {
         other.chartNegativeColor == chartNegativeColor &&
         other.detailBackground == detailBackground &&
         other.fillHandleSize == fillHandleSize &&
-        other.rowDragHandleWidth == rowDragHandleWidth;
+        other.rowDragHandleWidth == rowDragHandleWidth &&
+        listEquals(other.rowDividerDash, rowDividerDash) &&
+        other.columnDividerExtent == columnDividerExtent &&
+        other.headerDividerExtent == headerDividerExtent;
   }
 
   @override
@@ -593,6 +619,9 @@ class FitGridThemeData {
     detailBackground,
     fillHandleSize,
     rowDragHandleWidth,
+    if (rowDividerDash != null) Object.hashAll(rowDividerDash!),
+    columnDividerExtent,
+    headerDividerExtent,
   ]);
 }
 

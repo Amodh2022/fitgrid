@@ -537,6 +537,43 @@ class _HeaderCell<T> extends StatelessWidget {
   final VoidCallback? onTap;
   final void Function(String movedId, String targetId)? onReorder;
 
+  /// The cell with its trailing divider: a border down the full height, or
+  /// with [FitGridThemeData.headerDividerExtent] a short line centred on the
+  /// edge.
+  Widget _divided(Widget child) {
+    if (isLast) return child;
+    final side = BorderSide(
+      color: theme.columnDivider,
+      width: theme.dividerThickness,
+    );
+    final extent = theme.headerDividerExtent;
+    if (extent == null) {
+      return DecoratedBox(
+        decoration: BoxDecoration(border: BorderDirectional(end: side)),
+        child: child,
+      );
+    }
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        child,
+        PositionedDirectional(
+          end: 0,
+          top: 0,
+          bottom: 0,
+          width: side.width,
+          child: Center(
+            child: SizedBox(
+              width: side.width,
+              height: extent,
+              child: ColoredBox(color: side.color),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   /// Gap between the label and the sort icon.
   static const double _sortGap = 4.0;
 
@@ -683,18 +720,8 @@ class _HeaderCell<T> extends StatelessWidget {
                 (sortPriority >= 0
                     ? ', sort priority ${sortPriority + 1}'
                     : ''),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: isLast
-              ? null
-              : BorderDirectional(
-                  end: BorderSide(
-                    color: theme.columnDivider,
-                    width: theme.dividerThickness,
-                  ),
-                ),
-        ),
-        child: InkWell(
+      child: _divided(
+        InkWell(
           onTap: onTap,
           child: Padding(padding: theme.effectiveHeaderPadding, child: content),
         ),
