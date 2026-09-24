@@ -80,6 +80,9 @@ behaves as it did, and the package still has no dependency beyond Flutter.
   the package already required.
 - Agents working with the package can install its skill with
   `dart run skills@ get` — see `skills/`.
+- The example gallery gains six pages: spreadsheet editing; columns, filters
+  and saved layouts; pivot and export; detail rows with nested grids; infinite
+  scroll against a slow, failing feed; reorderable rows; and charts in cells.
 
 ## 0.1.0-dev
 
