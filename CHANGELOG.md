@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.1
+
+### Theme
+
+- **Dashed row rules.** `FitGridThemeData.rowDividerDash` takes alternating
+  dash and gap lengths, such as `[3, 2]`. The pattern starts at the grid's left
+  edge, so pinned and scrolling columns line up.
+- **Short column dividers.** `FitGridThemeData.columnDividerExtent` draws body
+  column rules as short ticks centred in each row, in `columnDivider`'s colour.
+  `headerDividerExtent` does the same for the dividers between header cells.
+  Both default to null, which keeps the full-height lines.
+
+### Fixes
+
+- Columns now size to fit their footer totals, so a sum wider than every cell
+  above it is no longer cut off.
+- A footer label and its value are laid out as one line. A long total is no
+  longer cut off while there is still room beside a short label.
+
+### Docs
+
+- The README is now a full guide and API reference, with a live demo, a
+  website, and screenshots on pub.dev.
+
 ## 0.1.0
 
 The release that turns a fast table into a grid people can work in. Every
