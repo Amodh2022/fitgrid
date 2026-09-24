@@ -4,6 +4,7 @@ description: >-
   cells: sorting, filters, cell editing, grouping and xlsx export over a
   million rows.
 version: 0.1.0
+homepage: https://fitgrid-e734.vercel.app/
 repository: https://github.com/Amodh2022/fitgrid
 issue_tracker: https://github.com/Amodh2022/fitgrid/issues
 

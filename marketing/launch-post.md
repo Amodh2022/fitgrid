@@ -58,7 +58,7 @@ FitGrid<Employee>(
 
 Try it:
 
-- Live demo: https://amodh2022.github.io/fitgrid/demo/
+- Live demo: https://fitgrid-e734.vercel.app/demo/
 - pub.dev: https://pub.dev/packages/fitgrid_table
 - GitHub: https://github.com/Amodh2022/fitgrid
 
@@ -82,7 +82,7 @@ doesn't do?"). Reply to comments — early discussion is what makes a post last.
 > fitgrid 0.1.0 is out: a Flutter data table that measures its own columns and
 > paints cells, so a million rows scroll like a hundred. Sorting, filters,
 > editing, grouping, pivots, xlsx export — MIT, no dependencies.
-> Demo: https://amodh2022.github.io/fitgrid/demo/
+> Demo: https://fitgrid-e734.vercel.app/demo/
 > #Flutter #FlutterDev #Dart
 
 Attach `screenshots/overview.png` or a short screen recording of the demo.
@@ -93,7 +93,7 @@ Attach `screenshots/overview.png` or a short screen recording of the demo.
 
 - Flutter Gems — https://fluttergems.dev (suggest it under Data Tables / Grids)
 - awesome-flutter — open a PR adding it under the UI / tables section
-- Google Search Console — add https://amodh2022.github.io/fitgrid/ and submit
-  `sitemap.xml`
+- Google Search Console — add https://fitgrid-e734.vercel.app/ and submit
+  `sitemap.xml` (robots.txt at the root already points to it)
 - pub.dev — once published, ask early users to like the package; likes feed
   pub.dev search ranking

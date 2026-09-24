@@ -89,6 +89,8 @@ behaves as it did, and the package still has no dependency beyond Flutter.
   the package already required.
 - Agents working with the package can install its skill with
   `dart run skills@ get` — see `skills/`.
+- A website with a live demo of the example gallery:
+  https://fitgrid-e734.vercel.app/demo/
 - Screenshots on the pub.dev page, a sharper package description, and topics
   that match how people search for a data table.
 - The example gallery gains six pages: spreadsheet editing; columns, filters

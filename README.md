@@ -5,6 +5,11 @@ column widths, and **paints cells** instead of building a widget for each one.
 
 ![fitgrid: a data grid with content-sized columns, sorting, selection and footer totals](https://raw.githubusercontent.com/Amodh2022/fitgrid/main/screenshots/overview.png)
 
+**[Try the live demo →](https://fitgrid-e734.vercel.app/demo/)** — every
+feature below, running in your browser. Also:
+[website](https://fitgrid-e734.vercel.app/) ·
+[choosing a Flutter data table](https://fitgrid-e734.vercel.app/choosing-a-flutter-data-table.html)
+
 ```
       rows   first frame   median scroll frame   painted cells   rows laid out
      1,000       21.0 ms              5.1 ms              94              20
@@ -1262,6 +1267,8 @@ dart run skills@ get
 ```
 
 ## Example app
+
+Run it in your browser: **[fitgrid-e734.vercel.app/demo](https://fitgrid-e734.vercel.app/demo/)**.
 
 `example/` is a gallery: two designs over the same data, pagination three ways,
 widget cells, conditional formatting, sizing with live timings, lazy loading,

@@ -23,5 +23,5 @@ Key facts for writing correct code:
 
 - [pub.dev package](https://pub.dev/packages/fitgrid_table)
 - [Source on GitHub](https://github.com/Amodh2022/fitgrid)
-- [Live demo](https://amodh2022.github.io/fitgrid/demo/)
-- [Choosing a Flutter data table](https://amodh2022.github.io/fitgrid/choosing-a-flutter-data-table.html)
+- [Live demo](https://fitgrid-e734.vercel.app/demo/)
+- [Choosing a Flutter data table](https://fitgrid-e734.vercel.app/choosing-a-flutter-data-table.html)
