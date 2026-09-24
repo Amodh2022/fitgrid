@@ -11,3 +11,5 @@ pubspec.lock
 site/
 marketing/
 .github/
+_site/
+tool/vercel_build.sh

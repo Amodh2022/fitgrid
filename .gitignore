@@ -6,3 +6,6 @@ pubspec.lock
 *.iml
 .vscode/
 .DS_Store
+
+# Vercel build output
+_site/
