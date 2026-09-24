@@ -6,7 +6,6 @@ import 'screens/controller_patterns.dart';
 import 'screens/detail_rows.dart';
 import 'screens/formatting.dart';
 import 'screens/grouping.dart';
-import 'screens/hospital_patients.dart';
 import 'screens/infinite_scroll.dart';
 import 'screens/lazy_loading.dart';
 import 'screens/pagination.dart';
@@ -74,14 +73,6 @@ final List<(String, List<Example>)> exampleSections = [
             'only the theme, pager and cell callbacks differ.',
         icon: Icons.palette_outlined,
         builder: (_) => const TwoDesignsScreen(),
-      ),
-      Example(
-        title: 'Hospital patient list',
-        subtitle:
-            'A hospital app\'s own patient table matched with a theme: its '
-            'colours and Poppins, dashed rules, cell ticks and gradient pager.',
-        icon: Icons.local_hospital_outlined,
-        builder: (_) => const HospitalPatientsScreen(),
       ),
       Example(
         title: 'Pagination',

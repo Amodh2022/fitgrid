@@ -22,9 +22,6 @@ striped: false,
 pagerBuilder: (context, pagination) => MyPager(pagination), // own footer
 ```
 
-The example app's "Hospital patient list" page matches a real app's table this
-way, pager included.
-
 ## Multi-column sort
 
 ```dart
