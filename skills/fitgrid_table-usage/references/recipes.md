@@ -3,6 +3,28 @@
 Short, working patterns for the opt-in features. Every one of them is off
 until you ask for it.
 
+## Matching an app's design system
+
+Everything visual is `FitGridThemeData`. Start from the app's Material theme
+and override the tokens; the dividers have three extra shapes.
+
+```dart
+theme: FitGridThemeData.fromTheme(Theme.of(context)).copyWith(
+  headerBackground: tokens.tableHeader,
+  rowBackground: tokens.tableWash,
+  cellTextStyle: tokens.body,             // font family, size, colour
+  borderRadius: BorderRadius.circular(6),
+  rowDividerDash: const [3, 2],           // dashed row rules (null = solid)
+  columnDividerExtent: 12,                // short ticks between cells
+  headerDividerExtent: 34,                // short header dividers
+),
+striped: false,
+pagerBuilder: (context, pagination) => MyPager(pagination), // own footer
+```
+
+The example app's "Hospital patient list" page matches a real app's table this
+way, pager included.
+
 ## Multi-column sort
 
 ```dart

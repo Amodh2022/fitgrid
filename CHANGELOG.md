@@ -67,6 +67,12 @@ behaves as it did, and the package still has no dependency beyond Flutter.
   `FitGridPivotValue` and `FitGridAggregation` produces an ordinary grid's rows
   and columns, with grand totals reduced from the source rows.
 
+### Theming
+
+- `FitGridThemeData.rowDividerDash` draws row rules dashed;
+  `columnDividerExtent` and `headerDividerExtent` draw column dividers as short
+  centred ticks in the body and the header. All off by default.
+
 ### Fixes
 
 - Keys typed into an open editor no longer reach the grid: Space used to toggle
@@ -80,7 +86,9 @@ behaves as it did, and the package still has no dependency beyond Flutter.
   the package already required.
 - Agents working with the package can install its skill with
   `dart run skills@ get` — see `skills/`.
-- The example gallery gains six pages: spreadsheet editing; columns, filters
+- The example gallery gains a "Hospital patient list" page, matching a real
+  app's table with a theme and a custom pager (Poppins bundled, OFL), and six
+  more pages: spreadsheet editing; columns, filters
   and saved layouts; pivot and export; detail rows with nested grids; infinite
   scroll against a slow, failing feed; reorderable rows; and charts in cells.
 

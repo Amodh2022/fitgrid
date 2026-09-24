@@ -189,6 +189,27 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('the hospital page pages, resizes and searches', (tester) async {
+    await _open(tester, 'Hospital patient list');
+    expect(fitGridRowCount(), 10);
+    expect(find.text('Showing 1–10 of 1200 items'), findsOneWidget);
+    expect(fitGridSection().theme.rowDividerDash, const [3.0, 2.0]);
+
+    await tester.tap(find.text('2').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Showing 11–20 of 1200 items'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Items per page'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('5').last);
+    await tester.pumpAndSettle();
+    expect(fitGridRowCount(), 5);
+
+    await tester.enterText(find.byType(TextField).first, 'Zara');
+    await tester.pumpAndSettle();
+    expect(fitGridRowText(0)[1], startsWith('Zara'));
+  });
+
   testWidgets('the pivot reshapes when its inputs change', (tester) async {
     await _open(tester, 'Pivot & export');
     final wide = fitGridColumnIds().length;
