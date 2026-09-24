@@ -3,7 +3,7 @@ description: >-
   A fast Flutter data table and data grid that measures column widths and paints
   cells: sorting, filters, cell editing, grouping and xlsx export over a
   million rows.
-version: 0.1.1
+version: 0.1.2
 homepage: https://fitgrid-e734.vercel.app/
 repository: https://github.com/Amodh2022/fitgrid
 issue_tracker: https://github.com/Amodh2022/fitgrid/issues
