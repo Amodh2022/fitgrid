@@ -253,8 +253,17 @@ Widget cells and charts have no text width to measure: give those columns
 Every resizable divider carries a grip, always visible so touch users can see
 it. Drag it to set a width; double-click it to hand the column back to its
 policy — for `auto`, measure again. A dragged width is still clamped by the
-column's `min`/`max`. Turn it off per column (`resizable: false`) or per grid
-(`resizableColumns: false`).
+column's `min`/`max`. Under `stretchColumnsToFill`, a resized column keeps the
+width it was dragged to and the others share the leftover. Turn it off per
+column (`resizable: false`) or per grid (`resizableColumns: false`).
+
+`onColumnResized` fires once when a drag ends, with the new width, and with
+`null` when a double-click or the column menu hands the column back to its
+policy:
+
+```dart
+onColumnResized: (columnId, width) => analytics.log(columnId, width),
+```
 
 ```dart
 controller.columns.setWidth('name', 240); // as a drag does
@@ -708,7 +717,8 @@ FitGrid<Employee>(controller: controller, showColumnMenu: true)
 ```
 
 Every header gets a ⋮ button: sort ascending / descending / clear, filter,
-pin to start / end / unpin, size to fit, hide, and "Columns…". Edit it with
+pin to start / end / unpin, size to fit, size all columns to fit, hide, and
+"Columns…". Edit it with
 `columnMenuBuilder`, which receives the built-in entries:
 
 ```dart
@@ -1186,9 +1196,12 @@ With one, those two arguments are ignored — update `controller.data.rows` and
 | `paginated`, `pageSize`, `pagerBuilder` | `false`, `null`, `null` | Paging. |
 | `onLoadMore`, `hasMoreRows`, `loadMoreThreshold`, `loadingRowCount` | `null`, `true`, `10`, `3` | Infinite scroll. |
 | `rowColor` | `null` | Per-row background. |
-| `contextMenuBuilder` | `null` | Right-click / long-press menu. |
+| `contextMenuBuilder` | `null` | Right-click / long-press menu. A long-press callback takes the long-press. |
 | `emptyState`, `loadingState` | `null` | Shown with no rows / while a source loads. |
 | `onRowTap`, `onCellTap` | `null` | Tap callbacks, with global indices. |
+| `onRowDoubleTap`, `onCellDoubleTap` | `null` | Double-tap callbacks. Single taps then wait out the double-tap window. |
+| `onRowLongPress`, `onCellLongPress` | `null` | Long-press callbacks; the touch way to open a record. |
+| `onColumnResized` | `null` | A resize drag ended (width) or was reset (`null`). |
 | `overscanRows` | `2` | Rows laid out beyond the viewport. |
 
 ## Testing

@@ -42,6 +42,45 @@ void main() {
     expect(find.bySemanticsLabel('Name column menu'), findsNothing);
   });
 
+  testWidgets('the menu sizes every column back to fit', (tester) async {
+    final controller = make();
+    final reports = <(String, double?)>[];
+    await tester.pumpWidget(
+      host(
+        FitGrid<Employee>(
+          controller: controller,
+          showColumnMenu: true,
+          onColumnResized: (id, width) => reports.add((id, width)),
+        ),
+      ),
+    );
+
+    // Nothing resized yet, so there is nothing to hand back.
+    await openMenu(tester, 'Name');
+    final entry = find.ancestor(
+      of: find.text('Size all columns to fit'),
+      matching: find.byType(PopupMenuItem<void>),
+    );
+    expect(tester.widget<PopupMenuItem<void>>(entry).enabled, isFalse);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+
+    controller.columns
+      ..setWidth('name', 300)
+      ..setWidth('salary', 200);
+    await tester.pump();
+
+    await openMenu(tester, 'Name');
+    await tester.tap(find.text('Size all columns to fit'));
+    await tester.pumpAndSettle();
+
+    expect(controller.columns.widthOverrides, isEmpty);
+    expect(
+      reports,
+      unorderedEquals(<(String, double?)>[('name', null), ('salary', null)]),
+    );
+  });
+
   testWidgets('the menu sorts, pins and hides', (tester) async {
     final controller = make();
     await tester.pumpWidget(

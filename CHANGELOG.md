@@ -2,6 +2,33 @@
 
 ## 0.1.3
 
+### Gestures and columns
+
+- **Double-tap and long-press callbacks.** `FitGrid.onRowDoubleTap`,
+  `onCellDoubleTap`, `onRowLongPress` and `onCellLongPress`, with global row
+  indices like `onRowTap`. A double-tap still opens the editor under the
+  default `editTrigger`. A long-press callback takes the long-press from the
+  context menu, which stays on right-click. Group headers and the checkbox,
+  detail and drag columns report neither.
+- **`FitGrid.onColumnResized`.** Fires once when a resize drag ends, with the
+  width, and with `null` when a double-click or the column menu hands a column
+  back to its width policy.
+- **Size all columns to fit.** A column menu entry that hands every resized
+  column back to its policy, as `controller.columns.autoSizeAll()` does.
+
+All three are opt-in: a grid that sets none of them behaves as before.
+
+### Fixes
+
+- A resized column now follows the pointer when `stretchColumnsToFill` is on,
+  which is the default. The dragged width used to be stretched again to fill
+  the grid, so the divider jumped away on the first move and then ran ahead of
+  the finger. A resized column now keeps the width it was dragged to, and the
+  columns nobody has resized share the leftover space.
+- Dragging a divider back after pushing a column past its `max` (or below its
+  `min`) takes effect at once. Before, the overshoot was banked and the column
+  stayed put until the pointer had moved all of it back.
+
 ### Docs
 
 - The changelog now has entries for every published version, 0.1.2 included,

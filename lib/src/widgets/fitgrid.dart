@@ -138,6 +138,11 @@ class FitGrid<T> extends StatefulWidget {
     this.loadingState,
     this.onRowTap,
     this.onCellTap,
+    this.onRowDoubleTap,
+    this.onCellDoubleTap,
+    this.onRowLongPress,
+    this.onCellLongPress,
+    this.onColumnResized,
     this.focusNode,
     super.key,
   }) : assert(
@@ -454,6 +459,43 @@ class FitGrid<T> extends StatefulWidget {
 
   /// Called with the cell a tap landed on. Fires alongside [onRowTap].
   final void Function(T row, int rowIndex, String columnId)? onCellTap;
+
+  /// Called when a row is double-tapped, which is how most grids open a
+  /// record. Fires alongside the editor when [editTrigger] is
+  /// [FitGridEditTrigger.doubleTap] and the cell is editable.
+  ///
+  /// Group headers and the checkbox, detail and drag columns do not report
+  /// double-taps: they are controls, not cells.
+  ///
+  /// Listening for double-taps can delay [onRowTap] and [onCellTap] by up to
+  /// the double-tap window (about 300ms), since a first tap cannot be told
+  /// apart from half of a double until the window closes.
+  final void Function(T row, int rowIndex)? onRowDoubleTap;
+
+  /// Called with the cell a double-tap landed on. Fires alongside
+  /// [onRowDoubleTap].
+  final void Function(T row, int rowIndex, String columnId)? onCellDoubleTap;
+
+  /// Called when a row is long-pressed: the touch counterpart of
+  /// [onRowDoubleTap].
+  ///
+  /// Setting this or [onCellLongPress] gives the long-press to the callback,
+  /// so it no longer opens the [contextMenuBuilder] menu. A right-click still
+  /// does.
+  final void Function(T row, int rowIndex)? onRowLongPress;
+
+  /// Called with the cell a long-press landed on. Fires alongside
+  /// [onRowLongPress].
+  final void Function(T row, int rowIndex, String columnId)? onCellLongPress;
+
+  /// Called when the user finishes dragging a column's divider, with the width
+  /// it was left at. Not called for every frame of the drag, nor for widths set
+  /// in code. A double-click that hands the column back to its own policy
+  /// reports null.
+  ///
+  /// For saving widths across sessions, [FitGridController.savedState] already
+  /// carries them; this is for reacting to a resize as it happens.
+  final void Function(String columnId, double? width)? onColumnResized;
 
   /// The node the grid focuses. Supply one to move focus into the grid from
   /// elsewhere; otherwise it keeps its own.
@@ -1091,8 +1133,14 @@ class _FitGridState<T> extends State<FitGrid<T>> {
               onResize: widget.resizableColumns
                   ? controller.columns.setWidth
                   : null,
+              onResizeEnd: widget.resizableColumns
+                  ? widget.onColumnResized
+                  : null,
               onAutoSize: widget.resizableColumns
-                  ? controller.columns.autoSize
+                  ? (id) {
+                      controller.columns.autoSize(id);
+                      widget.onColumnResized?.call(id, null);
+                    }
                   : null,
               onReorder: widget.reorderableColumns
                   ? controller.moveColumnBefore
@@ -1638,7 +1686,27 @@ class _FitGridState<T> extends State<FitGrid<T>> {
           () => controller.columns.setFreeze(columnId, FitGridFreeze.none),
         ),
       if (widget.resizableColumns && column.resizable)
-        item('Size to fit', null, () => controller.columns.autoSize(columnId)),
+        item('Size to fit', null, () {
+          controller.columns.autoSize(columnId);
+          widget.onColumnResized?.call(columnId, null);
+        }),
+      if (widget.resizableColumns)
+        item(
+          'Size all columns to fit',
+          null,
+          // Greyed out when no column has been resized: there is nothing to
+          // hand back.
+          controller.columns.widthOverrides.isEmpty
+              ? null
+              : () {
+                  final resized = controller.columns.widthOverrides.keys
+                      .toList();
+                  controller.columns.autoSizeAll();
+                  for (final id in resized) {
+                    widget.onColumnResized?.call(id, null);
+                  }
+                },
+        ),
       const PopupMenuDivider(),
       if (column.hideable)
         item(
@@ -1764,18 +1832,39 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         widget.editTrigger == FitGridEditTrigger.doubleTap &&
         columns.any((column) => column.isEditable);
     final wantsMenu = widget.contextMenuBuilder != null || widget.enableCopy;
+    final wantsDoubleTap =
+        widget.onRowDoubleTap != null || widget.onCellDoubleTap != null;
+    final wantsLongPress =
+        widget.onRowLongPress != null || widget.onCellLongPress != null;
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onDoubleTapDown: wantsDoubleTapEdit
-          ? (details) => _beginEdit(details.globalPosition, columns, rows)
+      onDoubleTapDown: wantsDoubleTapEdit || wantsDoubleTap
+          ? (details) {
+              if (wantsDoubleTapEdit) {
+                _beginEdit(details.globalPosition, columns, rows);
+              }
+              final hit = _rowHit(details.globalPosition, columns, rows);
+              if (hit == null) return;
+              final (row, rowIndex, columnId) = hit;
+              widget.onRowDoubleTap?.call(row, rowIndex);
+              widget.onCellDoubleTap?.call(row, rowIndex, columnId);
+            }
           : null,
-      onDoubleTap: wantsDoubleTapEdit ? () {} : null,
+      onDoubleTap: wantsDoubleTapEdit || wantsDoubleTap ? () {} : null,
       onSecondaryTapDown: wantsMenu
           ? (details) =>
                 _openMenu(context, details.globalPosition, columns, rows)
           : null,
-      onLongPressStart: wantsMenu
+      onLongPressStart: wantsLongPress
+          ? (details) {
+              final hit = _rowHit(details.globalPosition, columns, rows);
+              if (hit == null) return;
+              final (row, rowIndex, columnId) = hit;
+              widget.onRowLongPress?.call(row, rowIndex);
+              widget.onCellLongPress?.call(row, rowIndex, columnId);
+            }
+          : wantsMenu
           ? (details) =>
                 _openMenu(context, details.globalPosition, columns, rows)
           : null,
@@ -1888,6 +1977,29 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     if (openEditor) _beginEdit(globalPosition, columns, rows);
     widget.onRowTap?.call(row, globalRow);
     widget.onCellTap?.call(row, globalRow, column.id);
+  }
+
+  /// The data cell under a pointer, as the row, its index into the full row
+  /// list and the column id — or null over a group header, a synthetic column,
+  /// a widget cell that handles the pointer itself, or empty space.
+  (T, int, String)? _rowHit(
+    Offset globalPosition,
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows,
+  ) {
+    final hit = _cellAt(globalPosition, columns, rows);
+    if (hit == null) return null;
+    final (localRow, columnIndex) = hit;
+    final column = columns[columnIndex];
+    if (_isSynthetic(column)) return null;
+    if (column.cellBuilder != null && _cellWidgetClaims(globalPosition)) {
+      return null;
+    }
+    final line = rows.displayAt?.call(localRow);
+    if (line != null && line.isHeader) return null;
+    final row = rows.rowAt(localRow);
+    if (row == null) return null;
+    return (row, rows.globalIndex(localRow), column.id);
   }
 
   /// Where a fill drag has reached — a row into the rows as displayed and a

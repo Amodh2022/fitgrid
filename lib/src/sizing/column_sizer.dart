@@ -226,6 +226,7 @@ class FitGridColumnSizer {
         flexIndices: flexIndices,
         leftover: availableWidth - intrinsicTotal,
         stretchToFill: stretchToFill,
+        resized: overrides,
       );
     }
 
@@ -283,19 +284,27 @@ class FitGridColumnSizer {
   /// Both passes iterate: clamping a column to its max frees up space that the
   /// remaining columns should get, so the surplus is recirculated until it is
   /// spent or nobody can absorb it.
+  ///
+  /// A column in [resized] keeps the width it was dragged to. Stretching it
+  /// would move its divider away from the pointer that is holding it: the drag
+  /// sets a width and the stretch scales it up again, so the edge would jump
+  /// on the first move and then run ahead of the finger.
   static void _distributeLeftover<T>({
     required List<double> widths,
     required List<FitGridColumn<T>> columns,
     required List<int> flexIndices,
     required double leftover,
     required bool stretchToFill,
+    required Map<String, double> resized,
   }) {
     final growable = flexIndices.isNotEmpty
         ? flexIndices
         : stretchToFill
         ? <int>[
             for (var i = 0; i < columns.length; i++)
-              if (columns[i].width is FitGridAutoWidth) i,
+              if (columns[i].width is FitGridAutoWidth &&
+                  !resized.containsKey(columns[i].id))
+                i,
           ]
         : const <int>[];
     if (growable.isEmpty) return;

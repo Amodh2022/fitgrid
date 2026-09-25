@@ -95,6 +95,30 @@ void main() {
     expect(controller.columns.isResized('name'), isTrue);
   });
 
+  testWidgets('a stretched column follows the pointer', (tester) async {
+    // Stretching to fill is the default. A resized column used to be stretched
+    // again on top of the dragged width, so its divider jumped away from the
+    // finger on the first move.
+    final controller = FitGridController<_Row>(
+      rows: _rows(20),
+      columns: <FitGridColumn<_Row>>[
+        FitGridColumn<_Row>(id: 'name', label: 'Name', value: (r) => r.name),
+        FitGridColumn<_Row>(id: 'role', label: 'Role', value: (r) => r.role),
+      ],
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(_host(FitGrid<_Row>(controller: controller)));
+
+    final before = fitGridColumnWidth('name');
+    final total = fitGridSection().columnLayout.totalWidth;
+    await _dragHandle(tester, 0, 40);
+
+    expect(fitGridColumnWidth('name'), closeTo(before + 40, 1));
+    // The grid still fills its width; the other column gave up the room.
+    expect(fitGridSection().columnLayout.totalWidth, closeTo(total, 1));
+  });
+
   testWidgets('a drag is clamped by the column policy', (tester) async {
     final controller = FitGridController<_Row>(
       rows: _rows(20),
@@ -295,6 +319,81 @@ void main() {
     await gesture.up();
     await tester.pump(kDoubleTapTimeout);
 
+    expect(controller.columns.isResized('name'), isFalse);
+  });
+
+  testWidgets('dragging back from past the max responds at once', (
+    tester,
+  ) async {
+    final controller = FitGridController<_Row>(
+      rows: _rows(20),
+      columns: <FitGridColumn<_Row>>[
+        FitGridColumn<_Row>(
+          id: 'name',
+          label: 'Name',
+          value: (r) => r.name,
+          width: const FitGridColumnWidth.auto(min: 90, max: 140),
+        ),
+        FitGridColumn<_Row>(id: 'role', label: 'Role', value: (r) => r.role),
+      ],
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      _host(FitGrid<_Row>(controller: controller, stretchColumnsToFill: false)),
+    );
+
+    final gesture = await tester.startGesture(_handleCentre(tester, 0));
+    await gesture.moveBy(const Offset(kDragSlopDefault, 0));
+    await tester.pump();
+    await gesture.moveBy(const Offset(300, 0));
+    await tester.pump();
+    expect(fitGridColumnWidth('name'), 140);
+
+    // The overshoot is not banked: the first 20px back take 20px off.
+    await gesture.moveBy(const Offset(-20, 0));
+    await tester.pump();
+    expect(fitGridColumnWidth('name'), closeTo(120, 1));
+
+    await gesture.up();
+    await tester.pump(kDoubleTapTimeout);
+  });
+
+  testWidgets('onColumnResized reports the end of a drag and a reset', (
+    tester,
+  ) async {
+    final reports = <(String, double?)>[];
+    final controller = FitGridController<_Row>(
+      rows: _rows(20),
+      columns: <FitGridColumn<_Row>>[
+        FitGridColumn<_Row>(id: 'name', label: 'Name', value: (r) => r.name),
+        FitGridColumn<_Row>(id: 'role', label: 'Role', value: (r) => r.role),
+      ],
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      _host(
+        FitGrid<_Row>(
+          controller: controller,
+          onColumnResized: (id, width) => reports.add((id, width)),
+        ),
+      ),
+    );
+
+    await _dragHandle(tester, 0, 50);
+    // Once, at the end, not once per frame of the drag.
+    expect(reports, hasLength(1));
+    expect(reports.single.$1, 'name');
+    expect(reports.single.$2, closeTo(fitGridColumnWidth('name'), 0.01));
+
+    final handle = _handleCentre(tester, 0);
+    await tester.tapAt(handle);
+    await tester.pump(kDoubleTapMinTime);
+    await tester.tapAt(handle);
+    await tester.pumpAndSettle();
+
+    expect(reports.last, ('name', null));
     expect(controller.columns.isResized('name'), isFalse);
   });
 

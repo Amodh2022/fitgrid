@@ -34,6 +34,7 @@ class FitGridHeader<T> extends StatelessWidget {
     this.sortKeys = const <FitGridSortKey>[],
     required this.onSort,
     this.onResize,
+    this.onResizeEnd,
     this.onAutoSize,
     this.onReorder,
     this.onColumnMenu,
@@ -75,6 +76,9 @@ class FitGridHeader<T> extends StatelessWidget {
   /// width is raw: the sizer still clamps it against the column's own policy,
   /// so a drag cannot push a column past bounds it declared.
   final void Function(String columnId, double width)? onResize;
+
+  /// Called once when a resize drag ends, with the width it was left at.
+  final void Function(String columnId, double width)? onResizeEnd;
 
   /// Called when the user double-clicks a resize handle, asking for the column
   /// to size itself again.
@@ -344,8 +348,13 @@ class _Band<T> extends StatelessWidget {
                 theme: header.theme,
                 textDirection: textDirection,
                 startWidth: layout.widths[i],
+                clamp: header.columns[i].width.clamp,
                 onResize: (width) =>
                     header.onResize!(header.columns[i].id, width),
+                onResizeEnd: header.onResizeEnd == null
+                    ? null
+                    : (width) =>
+                          header.onResizeEnd!(header.columns[i].id, width),
                 onAutoSize: header.onAutoSize == null
                     ? null
                     : () => header.onAutoSize!(header.columns[i].id),
@@ -416,19 +425,29 @@ class _GroupCell extends StatelessWidget {
 /// back from the layout each frame. Reading it back would compound rounding,
 /// and worse, would stall the moment the column hit a clamp: the pointer would
 /// keep moving while the width did not, and the two would never agree again.
+///
+/// The tracked width is clamped by the column's own bounds as it goes. Left
+/// unclamped, a drag past the column's max would bank the overshoot, and
+/// dragging back would do nothing until the pointer had paid all of it back.
 class _ResizeHandle extends StatefulWidget {
   const _ResizeHandle({
     required this.theme,
     required this.textDirection,
     required this.startWidth,
+    required this.clamp,
     required this.onResize,
+    required this.onResizeEnd,
     required this.onAutoSize,
   });
 
   final FitGridThemeData theme;
   final TextDirection textDirection;
   final double startWidth;
+
+  /// The column's width policy bounds, applied to the tracked width.
+  final double Function(double width) clamp;
   final ValueChanged<double> onResize;
+  final ValueChanged<double>? onResizeEnd;
   final VoidCallback? onAutoSize;
 
   @override
@@ -462,10 +481,15 @@ class _ResizeHandleState extends State<_ResizeHandle> {
           final delta = widget.textDirection == TextDirection.rtl
               ? -details.delta.dx
               : details.delta.dx;
-          _width = math.max(widget.theme.minColumnWidth, _width + delta);
+          _width = widget.clamp(
+            math.max(widget.theme.minColumnWidth, _width + delta),
+          );
           widget.onResize(_width);
         },
-        onHorizontalDragEnd: (_) => setState(() => _dragging = false),
+        onHorizontalDragEnd: (_) {
+          setState(() => _dragging = false);
+          widget.onResizeEnd?.call(_width);
+        },
         onHorizontalDragCancel: () => setState(() => _dragging = false),
         child: Stack(
           alignment: Alignment.center,
