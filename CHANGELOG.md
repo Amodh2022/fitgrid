@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.3
+
+### Docs
+
+- The changelog now has entries for every published version, 0.1.2 included,
+  so pub.dev can match it to the release.
+
+## 0.1.2
+
+No code changes from 0.1.1.
+
+### Docs
+
+- Adds the 0.1.1 notes to the changelog, which were missing from the 0.1.1
+  upload.
+
 ## 0.1.1
 
 ### Theme
