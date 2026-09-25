@@ -1,0 +1,70 @@
+name: publish
+
+# Publishes a tag like v0.1.4 to pub.dev. Normally started by release.yaml
+# after a push to main bumps the version; pushing a tag by hand works too.
+#
+# Uses pub.dev automated publishing (OIDC), so no credentials are stored in
+# the repo. One-time setup on pub.dev → fitgrid_table → Admin → Automated
+# publishing: enable GitHub Actions, repository Amodh2022/fitgrid, tag
+# pattern `v{{version}}`, enable publishing from workflow_dispatch events,
+# and require the `pub.dev` environment.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  # release.yaml already ran CI on this commit before dispatching.
+  ci:
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/ci.yaml
+
+  publish:
+    needs: ci
+    if: >-
+      always() && startsWith(github.ref, 'refs/tags/v') &&
+      (needs.ci.result == 'success' || needs.ci.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: pub.dev
+    permissions:
+      id-token: write # the OIDC token pub.dev verifies
+      contents: write # the GitHub release
+    steps:
+      - uses: actions/checkout@v4
+
+      # A tag that disagrees with pubspec.yaml or has no CHANGELOG entry is a
+      # mistake; stop before anything is uploaded.
+      - name: Check tag, pubspec and CHANGELOG agree
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(sed -n 's/^version: *//p' pubspec.yaml)"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag v$tag does not match pubspec version $version"
+            exit 1
+          fi
+          if ! grep -qx "## $version" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $version' entry"
+            exit 1
+          fi
+
+      # setup-dart writes the pub.dev OIDC credentials; flutter-action then
+      # provides the SDK the package needs. Order matters.
+      - uses: dart-lang/setup-dart@v1
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter pub publish --force
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="## $version" '$0==v{on=1;next} /^## /{on=0} on' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md

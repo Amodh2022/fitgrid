@@ -1,9 +1,14 @@
 name: ci
 
+# Pushes to main run these same checks through release.yaml, which calls this
+# workflow and then publishes if the version was bumped.
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   analyze-and-test:

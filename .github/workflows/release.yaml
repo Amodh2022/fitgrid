@@ -1,0 +1,64 @@
+name: release
+
+# Every push to main runs CI. If it passes and pubspec.yaml carries a version
+# that is not on pub.dev yet, this tags the commit v<version> and starts
+# publish.yaml on that tag. A push that doesn't bump the version stops after CI.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yaml
+
+  tag:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the tag
+      actions: write # dispatch publish.yaml
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide whether this version is new
+        id: version
+        run: |
+          version="$(sed -n 's/^version: *//p' pubspec.yaml)"
+          name="$(sed -n 's/^name: *//p' pubspec.yaml)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          published="$(curl -fsS "https://pub.dev/api/packages/$name" \
+            | jq -r --arg v "$version" '[.versions[].version] | index($v) != null')"
+          if [ "$published" = "true" ]; then
+            echo "$name $version is already on pub.dev; nothing to release."
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --tags origin "v$version" >/dev/null; then
+            echo "::error::tag v$version exists but $version is not on pub.dev; publish it from the tag by hand (Actions → publish → Run workflow)."
+            exit 1
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check CHANGELOG has an entry
+        if: steps.version.outputs.new == 'true'
+        run: |
+          if ! grep -qx "## ${{ steps.version.outputs.version }}" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## ${{ steps.version.outputs.version }}' entry"
+            exit 1
+          fi
+
+      # A tag pushed with GITHUB_TOKEN doesn't trigger other workflows, but a
+      # workflow_dispatch does, and running it on the tag ref gives pub.dev
+      # the tag-scoped OIDC token it requires.
+      - name: Tag and dispatch publish
+        if: steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          git tag "$TAG"
+          git push origin "$TAG"
+          gh workflow run publish.yaml --ref "$TAG"
