@@ -17,6 +17,8 @@ class ColumnsAndFiltersScreen extends StatefulWidget {
 }
 
 class _ColumnsAndFiltersScreenState extends State<ColumnsAndFiltersScreen> {
+  bool _filterRow = true;
+
   late final FitGridController<Employee> _controller =
       FitGridController<Employee>(
         rows: generateEmployees(20000),
@@ -152,6 +154,13 @@ class _ColumnsAndFiltersScreenState extends State<ColumnsAndFiltersScreen> {
               'filter: FitGridFilterSpec.date((e) => e.startedOn),\n'
               'filter: const FitGridFilterSpec.values(),   // a checklist',
         ),
+        DemoNote.recommended(
+          'The row under the header filters as you type: "eng" contains, '
+          '"=Engineering" equals, and on Salary ">=90000" or "50000..60000". '
+          'It edits the same filters as the column menu, so either one shows '
+          'what the other set.',
+          code: 'FitGrid(showFilterRow: true, ...)',
+        ),
         DemoNote(
           'The "Job" and "Pay & tenure" bands are FitGrid.columnGroups. They '
           'follow their columns through a drag, and split in two if you move a '
@@ -174,6 +183,11 @@ class _ColumnsAndFiltersScreenState extends State<ColumnsAndFiltersScreen> {
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           FitGridColumnChooser<Employee>(controller: _controller),
+          FilterChip(
+            label: const Text('Filter row'),
+            selected: _filterRow,
+            onSelected: (on) => setState(() => _filterRow = on),
+          ),
           SizedBox(
             width: 220,
             child: TextField(
@@ -210,6 +224,7 @@ class _ColumnsAndFiltersScreenState extends State<ColumnsAndFiltersScreen> {
       child: FitGrid<Employee>(
         controller: _controller,
         showColumnMenu: true,
+        showFilterRow: _filterRow,
         reorderableColumns: true,
         columnGroups: const [
           FitGridColumnGroup(

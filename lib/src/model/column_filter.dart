@@ -168,6 +168,131 @@ class FitGridColumnFilter {
     );
   }
 
+  /// Reads the short form a filter row takes, or null when [text] is empty or
+  /// does not parse as [kind].
+  ///
+  /// Text columns: `abc` contains, `=abc` equals, `!=abc` does not equal.
+  /// Number and date columns: `5` equals, and `>5`, `>=5`, `<5`, `<=5`, `!=5`
+  /// and `5..10` (inclusive) do what they look like. Dates are `YYYY-MM-DD`.
+  /// Checklist columns have no short form.
+  static FitGridColumnFilter? parse(String text, FitGridFilterKind kind) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return null;
+    if (kind == FitGridFilterKind.checklist) return null;
+
+    // Longest prefix first, so `>=` is not read as `>` then `=5`.
+    const prefixes = <(String, FitGridFilterOperator)>[
+      ('!=', FitGridFilterOperator.notEquals),
+      ('>=', FitGridFilterOperator.greaterOrEqual),
+      ('<=', FitGridFilterOperator.lessOrEqual),
+      ('>', FitGridFilterOperator.greaterThan),
+      ('<', FitGridFilterOperator.lessThan),
+      ('=', FitGridFilterOperator.equals),
+    ];
+
+    if (kind == FitGridFilterKind.text) {
+      const textPrefixes = <(String, FitGridFilterOperator)>[
+        ('!=', FitGridFilterOperator.notEquals),
+        ('=', FitGridFilterOperator.equals),
+      ];
+      for (final (prefix, operator) in textPrefixes) {
+        if (trimmed.startsWith(prefix)) {
+          final rest = trimmed.substring(prefix.length).trim();
+          return rest.isEmpty
+              ? null
+              : FitGridColumnFilter(operator: operator, value: rest);
+        }
+      }
+      return FitGridColumnFilter(
+        operator: FitGridFilterOperator.contains,
+        value: trimmed,
+      );
+    }
+
+    Object? read(String s) {
+      final t = s.trim();
+      if (t.isEmpty) return null;
+      return kind == FitGridFilterKind.number
+          ? num.tryParse(t.replaceAll(',', ''))
+          : _parseDate(t);
+    }
+
+    final range = trimmed.indexOf('..');
+    if (range > 0) {
+      final low = read(trimmed.substring(0, range));
+      final high = read(trimmed.substring(range + 2));
+      if (low == null || high == null) return null;
+      return FitGridColumnFilter(
+        operator: FitGridFilterOperator.between,
+        value: low,
+        value2: high,
+      );
+    }
+    for (final (prefix, operator) in prefixes) {
+      if (trimmed.startsWith(prefix)) {
+        final value = read(trimmed.substring(prefix.length));
+        return value == null
+            ? null
+            : FitGridColumnFilter(operator: operator, value: value);
+      }
+    }
+    final value = read(trimmed);
+    return value == null
+        ? null
+        : FitGridColumnFilter(
+            operator: FitGridFilterOperator.equals,
+            value: value,
+          );
+  }
+
+  /// The short form [parse] reads back to this filter, or null when there is
+  /// none — a checklist, `starts with`, `is empty` and the like, which only
+  /// the filter dialog can express.
+  String? toText(FitGridFilterKind kind) {
+    if (kind == FitGridFilterKind.checklist) return null;
+    final v = value;
+    if (v == null) return null;
+    final shown = v is DateTime ? _formatDate(v) : '$v';
+    if (kind == FitGridFilterKind.text) {
+      if (v is! String) return null;
+      return switch (operator) {
+        FitGridFilterOperator.contains => shown,
+        FitGridFilterOperator.equals => '=$shown',
+        FitGridFilterOperator.notEquals => '!=$shown',
+        _ => null,
+      };
+    }
+    final upper = value2;
+    return switch (operator) {
+      FitGridFilterOperator.equals => shown,
+      FitGridFilterOperator.notEquals => '!=$shown',
+      FitGridFilterOperator.greaterThan => '>$shown',
+      FitGridFilterOperator.greaterOrEqual => '>=$shown',
+      FitGridFilterOperator.lessThan => '<$shown',
+      FitGridFilterOperator.lessOrEqual => '<=$shown',
+      // An open-ended range matches like "at least", so it reads as one.
+      FitGridFilterOperator.between =>
+        upper == null
+            ? '>=$shown'
+            : '$shown..${upper is DateTime ? _formatDate(upper) : '$upper'}',
+      _ => null,
+    };
+  }
+
+  /// A calendar day, as `YYYY-MM-DD`; rejects anything with a time in it.
+  static DateTime? _parseDate(String text) {
+    if (!RegExp(r'^\d{4}-\d{1,2}-\d{1,2}$').hasMatch(text)) return null;
+    final parts = text.split('-').map(int.parse).toList();
+    final date = DateTime(parts[0], parts[1], parts[2]);
+    // DateTime rolls 2024-02-31 over into March; a filter should not.
+    return date.month == parts[1] && date.day == parts[2] ? date : null;
+  }
+
+  static String _formatDate(DateTime date) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${date.year}-${two(date.month)}-${two(date.day)}';
+  }
+
   static Object? _encode(Object? value) =>
       value is DateTime ? {'date': value.toIso8601String()} : value;
 

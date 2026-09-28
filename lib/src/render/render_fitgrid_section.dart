@@ -323,7 +323,12 @@ class RenderFitGridSection extends RenderBox
   set specVersion(int value) {
     if (_specVersion == value) return;
     _specVersion = value;
-    _clearCache();
+    // Only the positional index goes. Painters are keyed on the full spec and
+    // verified on every hit, so a cell whose content did not change — nearly
+    // all of them, under a live feed that replaces a few rows a tick — keeps
+    // its laid-out text, and a stale one simply misses. The cache stays
+    // bounded by [_pruneCache].
+    _byCell.clear();
     markNeedsPaint();
     markNeedsSemanticsUpdate();
   }

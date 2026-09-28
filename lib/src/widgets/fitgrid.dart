@@ -28,10 +28,12 @@ import '../sizing/column_layout.dart';
 import '../sizing/column_sizer.dart';
 import '../sizing/row_metrics.dart';
 import '../sizing/row_sizer.dart';
+import '../theme/fitgrid_strings.dart';
 import '../theme/fitgrid_theme.dart';
 import 'fitgrid_cell_editor.dart';
 import 'fitgrid_column_chooser.dart';
 import 'fitgrid_filter_dialog.dart';
+import 'fitgrid_filter_row.dart';
 import 'fitgrid_footer.dart';
 import 'fitgrid_header.dart';
 import 'fitgrid_intents.dart';
@@ -95,6 +97,7 @@ class FitGrid<T> extends StatefulWidget {
     this.controller,
     this.dataSource,
     this.theme,
+    this.strings,
     this.rowHeight,
     this.striped = true,
     this.stretchColumnsToFill = true,
@@ -104,6 +107,7 @@ class FitGrid<T> extends StatefulWidget {
     this.reorderableColumns = false,
     this.multiSort = true,
     this.showColumnMenu = false,
+    this.showFilterRow = false,
     this.columnGroups = const <FitGridColumnGroup>[],
     this.stickyGroupHeaders = true,
     this.reorderableRows = false,
@@ -187,6 +191,11 @@ class FitGrid<T> extends StatefulWidget {
   /// Visual configuration. Defaults to the nearest [FitGridTheme], or one
   /// derived from the ambient Material theme.
   final FitGridThemeData? theme;
+
+  /// The text the grid shows and announces: menu items, pager, filter dialog,
+  /// screen-reader labels. Null uses the nearest [FitGridLocalizations], then
+  /// a [FitGridStringsDelegate] for the current locale, then English.
+  final FitGridStrings? strings;
 
   /// Row sizing. Null follows the theme's density.
   ///
@@ -328,6 +337,16 @@ class FitGrid<T> extends StatefulWidget {
   /// Off by default so an existing grid does not grow a button it was not
   /// designed with.
   final bool showColumnMenu;
+
+  /// Puts a row of filter fields under the header, one for each column with a
+  /// [FitGridColumn.filter] spec.
+  ///
+  /// Typing filters as you go: `abc` contains, `=abc` equals, and on number
+  /// and date columns `>5`, `<=2024-06-30` or `10..20`. A checklist column
+  /// gets a button that opens its filter dialog. The fields read and write
+  /// `controller.filter`, the same filters the column menu edits, so the two
+  /// always agree. Needs [showHeader].
+  final bool showFilterRow;
 
   /// Edits the column menu before it opens. Handed the built-in entries, so
   /// adding one item is a one-liner and removing one is a `where`; return an
@@ -764,14 +783,24 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         controller.range,
         controller.details,
       ]),
-      builder: (context, _) => LayoutBuilder(
-        builder: (context, constraints) => _build(context, constraints),
+      // Put in scope for the header, pager and filter row, which look their
+      // text up rather than being handed it.
+      builder: (context, _) => FitGridLocalizations(
+        strings: _strings,
+        child: LayoutBuilder(
+          builder: (context, constraints) => _build(context, constraints),
+        ),
       ),
     );
   }
 
+  /// The strings this grid uses, for code running outside [_build]'s scope.
+  FitGridStrings get _strings =>
+      widget.strings ?? FitGridLocalizations.of(context);
+
   Widget _build(BuildContext context, BoxConstraints constraints) {
     final controller = _controller;
+    final strings = FitGridLocalizations.of(context);
     final rowKey = widget.rowKey;
     controller.history.keyOf = rowKey == null
         ? _identityKey
@@ -790,7 +819,12 @@ class _FitGridState<T> extends State<FitGrid<T>> {
 
     final layout = _resolveLayout(
       columns: columns,
-      rows: measurable,
+      // The rows as supplied, not the view: a sort or a filter reorders or
+      // hides rows without changing what any of them says, so neither should
+      // cost a measurement pass — and columns that hold still while the user
+      // narrows a million rows down read better than ones that twitch.
+      rows: source == null ? controller.data.rows : measurable,
+      aggregateRows: measurable,
       theme: theme,
       availableWidth: constraints.maxWidth,
       textDirection: textDirection,
@@ -842,6 +876,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       controller.details.revision,
       _loadingMore,
       canReorder,
+      strings,
     );
 
     final pageOffset = rowsView.offset;
@@ -853,6 +888,17 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       alignment: FitGridAlignment.start,
       overflow: FitGridOverflow.clip,
     );
+    // The shared constant unless the loading label has been translated.
+    final loading = strings.loading == FitGridCellSpec.loading.semanticLabel
+        ? FitGridCellSpec.loading
+        : FitGridCellSpec(
+            text: '',
+            style: const TextStyle(),
+            alignment: FitGridAlignment.start,
+            overflow: FitGridOverflow.clip,
+            placeholder: true,
+            semanticLabel: strings.loading,
+          );
 
     FitGridCellSpec cellSpec(int rowIndex, int columnIndex) {
       final column = columns[columnIndex];
@@ -871,9 +917,10 @@ class _FitGridState<T> extends State<FitGrid<T>> {
           icon: line.expanded ? theme.expandedIcon : theme.collapsedIcon,
           iconColor: theme.headerForeground,
           iconSize: theme.sortIconSize,
-          semanticLabel:
-              '${line.label}, '
-              '${line.expanded ? 'expanded' : 'collapsed'}',
+          semanticLabel: strings.groupHeader(
+            line.label!,
+            expanded: line.expanded,
+          ),
         );
       }
 
@@ -882,7 +929,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       // skeleton row while more load — gets a placeholder bar. A detail panel
       // is covered by its widget and needs nothing.
       if (row == null) {
-        return line != null && line.isDetail ? blank : FitGridCellSpec.loading;
+        return line != null && line.isDetail ? blank : loading;
       }
       final globalRow = rowsView.globalIndex(rowIndex);
 
@@ -898,8 +945,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
               : theme.placeholderForeground.withValues(alpha: 0.3),
           iconSize: theme.sortIconSize,
           semanticLabel: canReorder
-              ? 'Drag to move, or press Alt and an arrow key'
-              : 'Row order is fixed while sorted or grouped',
+              ? strings.dragHandleHint
+              : strings.rowOrderFixed,
         );
       }
 
@@ -913,7 +960,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
           icon: open ? theme.expandedIcon : theme.collapsedIcon,
           iconColor: theme.headerForeground,
           iconSize: theme.sortIconSize,
-          semanticLabel: open ? 'Details shown' : 'Details hidden',
+          semanticLabel: open ? strings.detailsShown : strings.detailsHidden,
         );
       }
 
@@ -927,7 +974,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
           icon: on ? theme.checkboxCheckedIcon : theme.checkboxIcon,
           iconColor: on ? theme.focusOutline : theme.placeholderForeground,
           iconSize: theme.sortIconSize,
-          semanticLabel: on ? 'Selected' : 'Not selected',
+          semanticLabel: on ? strings.selected : strings.notSelected,
         );
       }
 
@@ -1116,6 +1163,11 @@ class _FitGridState<T> extends State<FitGrid<T>> {
           )
         : body;
 
+    final showsFilterRow =
+        widget.showHeader &&
+        widget.showFilterRow &&
+        columns.any((column) => column.filter != null);
+
     final frame = Column(
       children: [
         if (widget.showHeader)
@@ -1152,6 +1204,25 @@ class _FitGridState<T> extends State<FitGrid<T>> {
               columnGroups: widget.columnGroups,
             ),
           ),
+        if (showsFilterRow)
+          ListenableBuilder(
+            listenable: _horizontalController,
+            builder: (context, _) => FitGridFilterRow<T>(
+              columns: columns,
+              layout: layout,
+              theme: theme,
+              horizontalOffset: _horizontalController.hasClients
+                  ? _horizontalController.offset
+                  : 0.0,
+              filter: controller.filter,
+              onOpenDialog: (id) => showFitGridFilterDialog<T>(
+                context,
+                controller,
+                id,
+                strings: strings,
+              ),
+            ),
+          ),
         Expanded(child: hoverable),
         if (widget.showFooter && columns.any((c) => c.aggregate != null))
           ListenableBuilder(
@@ -1182,14 +1253,20 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         borderRadius: theme.borderRadius,
         child: Stack(
           children: [
-            frame,
-            if (source != null && source.isLoading && rowsView.isNotEmpty)
+            _fitFrame(frame, constraints, theme, showsFilterRow, columns),
+            // A page being fetched, or a large sort still running in the
+            // background while the previous order stays on screen. Read after
+            // the view, which is what starts the sort.
+            if ((source != null && source.isLoading && rowsView.isNotEmpty) ||
+                (source == null && controller.data.isSorting))
               Positioned(
                 left: 0,
                 right: 0,
-                top: widget.showHeader
-                    ? FitGridHeader.heightFor(theme, widget.columnGroups)
-                    : 0,
+                top:
+                    (widget.showHeader
+                        ? FitGridHeader.heightFor(theme, widget.columnGroups)
+                        : 0) +
+                    (showsFilterRow ? FitGridFilterRow.heightFor(theme) : 0),
                 child: LinearProgressIndicator(
                   minHeight: 2,
                   color: theme.focusOutline,
@@ -1221,6 +1298,47 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       shortcuts: kFitGridShortcuts,
       actions: _actions(columns, rowsView),
       child: decorated,
+    );
+  }
+
+  /// Keeps the frame from overflowing when the grid is given less height than
+  /// its header, filter row, footer and pager take — an `Expanded` grid when
+  /// the keyboard comes up, say. The frame is laid out at the height it needs
+  /// for one row and the bottom is clipped (by the rounded clip around it),
+  /// rather than the column throwing.
+  ///
+  /// The wrapper is there at every height, not only when it is needed:
+  /// adding it as the grid shrinks would rebuild the frame, and a filter-row
+  /// field rebuilt under the user's finger loses its focus, which closes the
+  /// very keyboard that shrank the grid.
+  Widget _fitFrame(
+    Widget frame,
+    BoxConstraints constraints,
+    FitGridThemeData theme,
+    bool showsFilterRow,
+    List<FitGridColumn<T>> columns,
+  ) {
+    if (!constraints.hasBoundedHeight) return frame;
+    final needed =
+        (widget.showHeader
+            ? FitGridHeader.heightFor(theme, widget.columnGroups)
+            : 0.0) +
+        (showsFilterRow ? FitGridFilterRow.heightFor(theme) : 0.0) +
+        (widget.showFooter && columns.any((c) => c.aggregate != null)
+            ? theme.effectiveHeaderHeight
+            : 0.0) +
+        // A custom pager's height is not known before it lays out; assume it
+        // is like the built-in one.
+        (widget.paginated ? theme.effectiveHeaderHeight : 0.0) +
+        theme.effectiveRowHeight +
+        // The border drawn around the frame.
+        theme.dividerThickness * 2;
+    final height = math.max(constraints.maxHeight, needed);
+    return OverflowBox(
+      alignment: Alignment.topCenter,
+      minHeight: height,
+      maxHeight: height,
+      child: frame,
     );
   }
 
@@ -1616,6 +1734,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     final column = controller.columns.byId(columnId);
     if (column == null) return;
     final theme = widget.theme ?? FitGridTheme.of(context);
+    final strings = _strings;
     final direction = controller.data.directionOf(columnId);
     final visibleCount = controller.columns.visible.length;
 
@@ -1649,50 +1768,54 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     final defaults = <PopupMenuEntry<void>>[
       if (column.sortable) ...<PopupMenuEntry<void>>[
         item(
-          'Sort ascending',
+          strings.sortAscending,
           theme.sortAscendingIcon,
           direction == FitGridSortDirection.ascending
               ? null
               : () => sortTo(FitGridSortDirection.ascending),
         ),
         item(
-          'Sort descending',
+          strings.sortDescending,
           theme.sortDescendingIcon,
           direction == FitGridSortDirection.descending
               ? null
               : () => sortTo(FitGridSortDirection.descending),
         ),
         if (controller.data.sortKeys.isNotEmpty)
-          item('Clear sort', null, () => sortTo(FitGridSortDirection.none)),
+          item(
+            strings.clearSort,
+            null,
+            () => sortTo(FitGridSortDirection.none),
+          ),
         const PopupMenuDivider(),
       ],
-      ..._filterMenuItems(column, theme, item),
+      ..._filterMenuItems(column, theme, strings, item),
       if (column.freeze != FitGridFreeze.start)
         item(
-          'Pin to start',
+          strings.pinToStart,
           null,
           () => controller.columns.setFreeze(columnId, FitGridFreeze.start),
         ),
       if (column.freeze != FitGridFreeze.end)
         item(
-          'Pin to end',
+          strings.pinToEnd,
           null,
           () => controller.columns.setFreeze(columnId, FitGridFreeze.end),
         ),
       if (column.freeze != FitGridFreeze.none)
         item(
-          'Unpin',
+          strings.unpin,
           null,
           () => controller.columns.setFreeze(columnId, FitGridFreeze.none),
         ),
       if (widget.resizableColumns && column.resizable)
-        item('Size to fit', null, () {
+        item(strings.sizeToFit, null, () {
           controller.columns.autoSize(columnId);
           widget.onColumnResized?.call(columnId, null);
         }),
       if (widget.resizableColumns)
         item(
-          'Size all columns to fit',
+          strings.sizeAllColumnsToFit,
           null,
           // Greyed out when no column has been resized: there is nothing to
           // hand back.
@@ -1710,19 +1833,21 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       const PopupMenuDivider(),
       if (column.hideable)
         item(
-          'Hide column',
+          strings.hideColumn,
           null,
           visibleCount <= 1
               ? null
               : () => controller.columns.setVisible(columnId, false),
         ),
       item(
-        'Columns…',
+        strings.columnsMenuItem,
         Icons.view_column_outlined,
         // After the menu has closed: a dialog pushed from inside a menu item's
         // tap would be popped again by the menu's own route.
         () => WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) showFitGridColumnDialog<T>(context, controller);
+          if (mounted) {
+            showFitGridColumnDialog<T>(context, controller, strings: strings);
+          }
         }),
       ),
     ];
@@ -1751,6 +1876,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   List<PopupMenuEntry<void>> _filterMenuItems(
     FitGridColumn<T> column,
     FitGridThemeData theme,
+    FitGridStrings strings,
     PopupMenuItem<void> Function(String, IconData?, VoidCallback?) item,
   ) {
     if (column.filter == null) return const <PopupMenuEntry<void>>[];
@@ -1758,17 +1884,26 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     final active = filter.filters.containsKey(column.id);
     return <PopupMenuEntry<void>>[
       item(
-        'Filter…',
+        strings.filterMenuItem,
         active ? theme.filterActiveIcon : theme.filterIcon,
         // After the menu has closed, for the same reason as "Columns…".
         () => WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
-            showFitGridFilterDialog<T>(context, _controller, column.id);
+            showFitGridFilterDialog<T>(
+              context,
+              _controller,
+              column.id,
+              strings: strings,
+            );
           }
         }),
       ),
       if (active)
-        item('Clear filter', null, () => filter.setFilter(column.id, null)),
+        item(
+          strings.clearFilter,
+          null,
+          () => filter.setFilter(column.id, null),
+        ),
       const PopupMenuDivider(),
     ];
   }
@@ -2321,7 +2456,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     return _controller.data.length;
   }
 
-  /// Moves a row and carries the selection and the focus along with it.
+  /// Moves a row. The selection and the focus go with it.
   void _reorderRow(int from, int to) {
     final data = _controller.data;
     final callback = widget.onRowReorder;
@@ -2337,22 +2472,9 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       final all = data.rows;
       data.moveRow(all.indexOf(view[from]), all.indexOf(view[to]));
     }
-
-    int follow(int i) {
-      if (i == from) return to;
-      if (from < to && i > from && i <= to) return i - 1;
-      if (to < from && i >= to && i < from) return i + 1;
-      return i;
-    }
-
-    final selection = _controller.selection;
-    if (selection.isNotEmpty) {
-      selection.select(<int>[for (final i in selection.selected) follow(i)]);
-    }
-    final focus = _controller.focus;
-    if (focus.hasFocus) {
-      focus.moveTo(follow(focus.rowIndex!), focus.columnId!);
-    }
+    // The selection and the focus follow their records on their own: the
+    // controller re-points them whenever the view changes, including when the
+    // host's onRowReorder hands back reordered rows later.
   }
 
   /// The pointer dragging out a range, or null.
@@ -2641,7 +2763,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
           if (widget.enableCopy)
             PopupMenuItem<void>(
               onTap: () => _copy(columns, rows),
-              child: const Text('Copy'),
+              child: Text(_strings.copy),
             ),
         ];
     if (items.isEmpty || !context.mounted) return;
@@ -3357,9 +3479,15 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       rowIndex: localRow,
       columnIndex: columnIndex,
       child: FitGridCellEditor<T>(
-        // Keyed on the cell, so moving the editor to a different cell builds a
-        // fresh field rather than carrying the previous cell's text across.
-        key: ValueKey<String>('fitgrid-editor-$globalRow-${column.id}'),
+        // Keyed on the record and the column, so moving the editor to a
+        // different cell builds a fresh field rather than carrying the previous
+        // cell's text across, while a sort that moves the same record keeps
+        // what the user has typed.
+        key: ValueKey<(String, Object, String)>((
+          'fitgrid-editor',
+          _historyKey(row),
+          column.id,
+        )),
         editor: editor,
         session: session,
         theme: theme,
@@ -3559,16 +3687,22 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   FitGridColumnLayout _resolveLayout({
     required List<FitGridColumn<T>> columns,
     required List<T> rows,
+    required List<T> aggregateRows,
     required FitGridThemeData theme,
     required double availableWidth,
     required TextDirection textDirection,
     required TextScaler textScaler,
     required Map<String, double> overrides,
   }) {
+    // A footer total is of the rows on screen, so a grid with one re-derives
+    // when the view does; one without keys on the supplied rows alone.
+    final aggregates =
+        widget.showFooter && columns.any((column) => column.aggregate != null);
     final key = Object.hash(
       identityHashCode(columns),
       identityHashCode(rows),
       rows.length,
+      aggregates ? identityHashCode(aggregateRows) : null,
       theme,
       availableWidth,
       textDirection,
@@ -3593,11 +3727,14 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       headerExtra: _headerExtra(theme),
       // Only when the cache missed: an aggregate is a pass over the rows,
       // and the key above already changes whenever the rows do.
-      footerTexts: widget.showFooter
+      footerTexts: aggregates
           ? <String, (String?, String)>{
               for (final column in columns)
                 if (column.aggregate != null)
-                  column.id: (column.footerLabel, column.aggregate!(rows)),
+                  column.id: (
+                    column.footerLabel,
+                    column.aggregate!(aggregateRows),
+                  ),
             }
           : const <String, (String?, String)>{},
     );
@@ -3728,7 +3865,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Text(
-          source?.error != null ? 'Could not load rows' : 'No rows',
+          source?.error != null ? _strings.couldNotLoadRows : _strings.noRows,
           style: theme.cellTextStyle.copyWith(
             color: theme.placeholderForeground,
           ),
@@ -3814,6 +3951,7 @@ class _SelectAllBox extends StatelessWidget {
   Widget build(BuildContext context) {
     final all = total > 0 && selection.length >= total;
     final some = selection.isNotEmpty && !all;
+    final strings = FitGridLocalizations.of(context);
 
     return Center(
       child: IconButton(
@@ -3821,7 +3959,7 @@ class _SelectAllBox extends StatelessWidget {
         constraints: const BoxConstraints(),
         iconSize: theme.sortIconSize,
         visualDensity: VisualDensity.compact,
-        tooltip: all ? 'Clear selection' : 'Select all',
+        tooltip: all ? strings.clearSelection : strings.selectAll,
         onPressed: total == 0 ? null : () => onChanged(!all),
         icon: Icon(
           all

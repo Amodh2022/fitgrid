@@ -1,3 +1,4 @@
+import '../controller/fitgrid_sort.dart';
 import 'package:flutter/widgets.dart';
 
 import 'cell_visual.dart';
@@ -88,6 +89,7 @@ class FitGridColumn<T> {
     this.aggregate,
     this.footerLabel,
     this.comparator,
+    this.sortValue,
     this.cellBuilder,
     this.headerBuilder,
     this.cellStyle,
@@ -190,6 +192,25 @@ class FitGridColumn<T> {
   /// dates — supply one for those.
   final Comparator<T>? comparator;
 
+  /// The value this column sorts by — a `String`, `num`, `DateTime` or
+  /// `bool`, with null sorting first — in place of a [comparator].
+  ///
+  /// Prefer it to a comparator for large grids: a sort by values is read once
+  /// per row and, from `FitGridDataState.backgroundSortThreshold` rows up,
+  /// runs on a background isolate, which a closure comparator cannot. When
+  /// both are given this one decides the order.
+  ///
+  /// ```dart
+  /// FitGridColumn<Order>(
+  ///   id: 'amount',
+  ///   label: 'Amount',
+  ///   value: (o) => o.amount.toStringAsFixed(2),
+  ///   sortable: true,
+  ///   sortValue: (o) => o.amount,
+  /// )
+  /// ```
+  final Object? Function(T row)? sortValue;
+
   /// Builds a real widget for each cell instead of painting text. See
   /// [FitGridCellBuilder].
   final FitGridCellBuilder<T>? cellBuilder;
@@ -232,10 +253,21 @@ class FitGridColumn<T> {
   /// Effective header alignment.
   FitGridAlignment get effectiveHeaderAlignment => headerAlignment ?? alignment;
 
-  /// Orders [a] and [b] by this column, falling back to comparing the rendered
-  /// text when no [comparator] was supplied.
-  int compare(T a, T b) =>
-      comparator?.call(a, b) ?? value(a).compareTo(value(b));
+  /// Orders [a] and [b] by this column: by [sortValue] when there is one,
+  /// then by [comparator], and otherwise by the rendered text.
+  int compare(T a, T b) {
+    final sortValue = this.sortValue;
+    if (sortValue != null) {
+      return fitGridCompareSortValues(sortValue(a), sortValue(b));
+    }
+    return comparator?.call(a, b) ?? value(a).compareTo(value(b));
+  }
+
+  /// What a sort reads out of each row for this column, or null when only
+  /// its [comparator] can order it — the one case that has to compare row
+  /// objects, and so the one that cannot sort in the background.
+  Object? Function(T row)? get sortValueOf =>
+      sortValue ?? (comparator == null ? value : null);
 
   FitGridColumn<T> copyWith({
     String? id,
@@ -260,6 +292,7 @@ class FitGridColumn<T> {
     FitGridAggregate<T>? aggregate,
     String? footerLabel,
     Comparator<T>? comparator,
+    Object? Function(T row)? sortValue,
     FitGridCellBuilder<T>? cellBuilder,
     WidgetBuilder? headerBuilder,
     FitGridCellStyle<T>? cellStyle,
@@ -291,6 +324,7 @@ class FitGridColumn<T> {
       aggregate: aggregate ?? this.aggregate,
       footerLabel: footerLabel ?? this.footerLabel,
       comparator: comparator ?? this.comparator,
+      sortValue: sortValue ?? this.sortValue,
       cellBuilder: cellBuilder ?? this.cellBuilder,
       headerBuilder: headerBuilder ?? this.headerBuilder,
       cellStyle: cellStyle ?? this.cellStyle,

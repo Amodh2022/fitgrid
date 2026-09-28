@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../controller/fitgrid_pagination.dart';
+import '../theme/fitgrid_strings.dart';
 import '../theme/fitgrid_theme.dart';
 
 /// Formats the "1–25 of 1,000" label. Swap it out for another language, another
@@ -25,19 +26,17 @@ class FitGridPager extends StatelessWidget {
   final FitGridPaginationState pagination;
   final FitGridThemeData theme;
 
-  /// Overrides the range readout. Defaults to `1–25 of 1,000`.
+  /// Overrides the range readout. Defaults to [FitGridStrings.pageRange].
   final FitGridPageLabel? label;
 
   final bool showPageSizeSelector;
-
-  String _defaultLabel(int first, int last, int total) =>
-      total == 0 ? 'No rows' : '$first–$last of $total';
 
   @override
   Widget build(BuildContext context) {
     final first = pagination.rowsOnPage == 0 ? 0 : pagination.firstRowIndex + 1;
     final last = pagination.endRowIndex;
-    final text = (label ?? _defaultLabel)(first, last, pagination.rowCount);
+    final strings = FitGridLocalizations.of(context);
+    final text = (label ?? strings.pageRange)(first, last, pagination.rowCount);
 
     return Container(
       height: theme.effectiveHeaderHeight,
@@ -50,56 +49,87 @@ class FitGridPager extends StatelessWidget {
           top: BorderSide(color: theme.border, width: theme.dividerThickness),
         ),
       ),
-      child: Row(
-        children: [
-          if (showPageSizeSelector) ...[
-            Text('Rows', style: theme.cellTextStyle),
-            const SizedBox(width: 8),
-            DropdownButton<int>(
-              value: pagination.pageSize,
-              underline: const SizedBox.shrink(),
-              isDense: true,
-              style: theme.cellTextStyle,
-              items: [
-                for (final size in pagination.pageSizeOptions)
-                  DropdownMenuItem<int>(value: size, child: Text('$size')),
+      // On a phone the whole strip does not fit. It gives things up in order
+      // of how little they are missed: the "Rows" caption, then the page-size
+      // picker and the first/last buttons. Previous, next and where you are
+      // always stay.
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final showCaption = width >= _captionWidth;
+          final showSizes = showPageSizeSelector && width >= _compactWidth;
+          final showEnds = width >= _compactWidth;
+          return Row(
+            children: [
+              if (showSizes) ...[
+                if (showCaption) ...[
+                  Text(strings.rowsPerPage, style: theme.cellTextStyle),
+                  const SizedBox(width: 8),
+                ],
+                DropdownButton<int>(
+                  value: pagination.pageSize,
+                  underline: const SizedBox.shrink(),
+                  isDense: true,
+                  style: theme.cellTextStyle,
+                  items: [
+                    for (final size in pagination.pageSizeOptions)
+                      DropdownMenuItem<int>(value: size, child: Text('$size')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) pagination.pageSize = value;
+                  },
+                ),
               ],
-              onChanged: (value) {
-                if (value != null) pagination.pageSize = value;
-              },
-            ),
-          ],
-          const Spacer(),
-          Text(text, style: theme.cellTextStyle),
-          const SizedBox(width: 12),
-          _PagerButton(
-            icon: Icons.first_page_rounded,
-            tooltip: 'First page',
-            onPressed: pagination.hasPrevious ? pagination.first : null,
-            theme: theme,
-          ),
-          _PagerButton(
-            icon: Icons.chevron_left_rounded,
-            tooltip: 'Previous page',
-            onPressed: pagination.hasPrevious ? pagination.previous : null,
-            theme: theme,
-          ),
-          _PagerButton(
-            icon: Icons.chevron_right_rounded,
-            tooltip: 'Next page',
-            onPressed: pagination.hasNext ? pagination.next : null,
-            theme: theme,
-          ),
-          _PagerButton(
-            icon: Icons.last_page_rounded,
-            tooltip: 'Last page',
-            onPressed: pagination.hasNext ? pagination.last : null,
-            theme: theme,
-          ),
-        ],
+              const Spacer(),
+              Flexible(
+                flex: 8,
+                child: Text(
+                  text,
+                  style: theme.cellTextStyle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                ),
+              ),
+              const SizedBox(width: 12),
+              if (showEnds)
+                _PagerButton(
+                  icon: Icons.first_page_rounded,
+                  tooltip: strings.firstPage,
+                  onPressed: pagination.hasPrevious ? pagination.first : null,
+                  theme: theme,
+                ),
+              _PagerButton(
+                icon: Icons.chevron_left_rounded,
+                tooltip: strings.previousPage,
+                onPressed: pagination.hasPrevious ? pagination.previous : null,
+                theme: theme,
+              ),
+              _PagerButton(
+                icon: Icons.chevron_right_rounded,
+                tooltip: strings.nextPage,
+                onPressed: pagination.hasNext ? pagination.next : null,
+                theme: theme,
+              ),
+              if (showEnds)
+                _PagerButton(
+                  icon: Icons.last_page_rounded,
+                  tooltip: strings.lastPage,
+                  onPressed: pagination.hasNext ? pagination.last : null,
+                  theme: theme,
+                ),
+            ],
+          );
+        },
       ),
     );
   }
+
+  /// Narrower than this, the "Rows" caption goes.
+  static const double _captionWidth = 520;
+
+  /// Narrower than this, the page-size picker and first/last buttons go.
+  static const double _compactWidth = 420;
 }
 
 class _PagerButton extends StatelessWidget {

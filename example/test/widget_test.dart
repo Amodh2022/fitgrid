@@ -11,7 +11,12 @@ Future<void> _open(WidgetTester tester, String title) async {
   await tester.binding.setSurfaceSize(const Size(1400, 1000));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(const ExampleApp());
-  await tester.scrollUntilVisible(find.text(title), 100);
+  await tester.scrollUntilVisible(
+    find.text(title),
+    100,
+    // The page scroller, not the search field's own.
+    scrollable: find.byType(Scrollable).first,
+  );
   // Fully on screen, not just past the edge, or the tap lands off the card.
   await tester.ensureVisible(find.text(title));
   await tester.pumpAndSettle();
@@ -24,7 +29,12 @@ void main() {
     await tester.pumpWidget(const ExampleApp());
     for (final (_, examples) in exampleSections) {
       for (final example in examples) {
-        await tester.scrollUntilVisible(find.text(example.title), 100);
+        await tester.scrollUntilVisible(
+          find.text(example.title),
+          100,
+          // The page scroller, not the search field's own.
+          scrollable: find.byType(Scrollable).first,
+        );
         expect(find.text(example.title), findsOneWidget);
       }
     }

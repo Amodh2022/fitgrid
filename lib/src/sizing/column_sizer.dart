@@ -43,6 +43,24 @@ class FitGridColumnSizer {
   /// Identity of the (columns, rows) pair the progress below belongs to.
   Object? _progressKey;
 
+  /// Everything but the rows that the cached measurements depend on.
+  Object? _baseKey;
+
+  /// The rows the cached measurements were taken from. Held so the next list
+  /// can be compared against it element by element.
+  List<Object?>? _measuredList;
+
+  /// The longest cells of each sampled column, with the row each came from.
+  final Map<String, List<(int, String)>> _candidates =
+      <String, List<(int, String)>>{};
+
+  /// Measured header labels, by label.
+  final Map<String, double> _labelWidths = <String, double>{};
+
+  /// The widest measured candidate of each sampled column, so an update that
+  /// leaves the candidates alone costs no text layout at all.
+  final Map<String, double> _candidateWidest = <String, double>{};
+
   /// How many rows of each exhaustively-measured column have been seen.
   final Map<String, int> _measuredRows = <String, int>{};
 
@@ -83,20 +101,39 @@ class FitGridColumnSizer {
       return FitGridColumnLayout.empty;
     }
 
-    // Progress belongs to one dataset and one set of columns. Anything else
-    // would carry a stale maximum across a sort or a filter.
-    final progressKey = Object.hash(
+    // Measurements belong to one set of columns under one style. A new row
+    // list under the same columns is usually a live update: most of its rows
+    // are the very objects measured last time, and only the replaced ones need
+    // looking at. [changed] lists those, or is null when everything must be
+    // measured again.
+    final baseKey = Object.hash(
       identityHashCode(columns),
-      identityHashCode(rows),
-      rows.length,
       theme,
       textDirection,
       textScaler,
     );
+    final previous = _measuredList;
+    List<int>? changed;
+    if (_baseKey == baseKey && previous != null) {
+      changed = identical(previous, rows)
+          ? const <int>[]
+          : _changedRows(previous, rows);
+    }
+    if (_baseKey != baseKey) _labelWidths.clear();
+    if (changed == null) {
+      _candidates.clear();
+      _candidateWidest.clear();
+    }
+    _baseKey = baseKey;
+    _measuredList = rows;
+
+    final progressKey = Object.hash(baseKey, identityHashCode(rows));
     if (_progressKey != progressKey) {
       _progressKey = progressKey;
-      _measuredRows.clear();
-      _widest.clear();
+      if (changed == null) {
+        _measuredRows.clear();
+        _widest.clear();
+      }
     }
     _isComplete = true;
     var budget = measurementBudget;
@@ -176,6 +213,25 @@ class FitGridColumnSizer {
               // that gets rationed. Each pass picks up where the last left off.
               var from = _measuredRows[column.id] ?? 0;
               widest = math.max(widest, _widest[column.id] ?? 0);
+              // Replaced rows already passed over are measured now; the rest
+              // are reached by the pass as it continues. A value that got
+              // shorter does not narrow the column until the rows are
+              // replaced wholesale — under a live feed that is what keeps the
+              // columns still.
+              for (final index in changed ?? const <int>[]) {
+                if (index >= from) continue;
+                final text = column.value(rows[index]);
+                if (text.isEmpty) continue;
+                final width =
+                    _measure(
+                      text,
+                      theme.cellTextStyle,
+                      textDirection,
+                      textScaler,
+                    ) +
+                    cellChrome;
+                if (width > widest) widest = width;
+              }
               final to = math.min(rows.length, from + budget);
               for (; from < to; from++) {
                 final text = column.value(rows[from]);
@@ -196,22 +252,38 @@ class FitGridColumnSizer {
               if (to < rows.length) _isComplete = false;
               if (budget <= 0) budget = 0;
             } else {
-              for (final text in _longestByChars(
-                rows,
-                column.value,
-                sampleSize,
-              )) {
-                if (text.isEmpty) continue;
-                final width =
-                    _measure(
-                      text,
-                      theme.cellTextStyle,
-                      textDirection,
-                      textScaler,
-                    ) +
-                    cellChrome;
-                if (width > widest) widest = width;
+              final cached = _candidates[column.id];
+              var candidates = cached;
+              if (cached == null ||
+                  !_updateCandidates(
+                    column.id,
+                    cached,
+                    rows,
+                    changed!,
+                    column.value,
+                    sampleSize,
+                  )) {
+                candidates = _longestByChars(rows, column.value, sampleSize);
+                _candidates[column.id] = candidates;
+                _candidateWidest.remove(column.id);
               }
+              var sampled = _candidateWidest[column.id];
+              if (sampled == null) {
+                sampled = 0.0;
+                for (final (_, text) in candidates!) {
+                  final width =
+                      _measure(
+                        text,
+                        theme.cellTextStyle,
+                        textDirection,
+                        textScaler,
+                      ) +
+                      cellChrome;
+                  if (width > sampled!) sampled = width;
+                }
+                _candidateWidest[column.id] = sampled!;
+              }
+              widest = math.max(widest, sampled);
             }
           }
           widths[i] = policy.clamp(widest);
@@ -248,7 +320,9 @@ class FitGridColumnSizer {
     TextScaler textScaler, [
     (String?, String)? footer,
   ]) {
-    final text = _measure(
+    // Labels do not change with the rows, so they are measured once per set
+    // of columns and style — the cache is dropped with the others.
+    final text = _labelWidths[column.label] ??= _measure(
       column.label,
       theme.headerTextStyle,
       textDirection,
@@ -343,35 +417,83 @@ class FitGridColumnSizer {
     }
   }
 
-  /// The up-to-[k] longest cell strings in a column, by character count.
+  /// The indices at which [next] holds a different object from [previous],
+  /// or null when so much has changed — a different length, or a sizeable
+  /// share of the rows — that measuring from scratch is the cheaper answer.
+  static List<int>? _changedRows(List<Object?> previous, List<Object?> next) {
+    if (previous.length != next.length) return null;
+    final limit = next.length ~/ 4;
+    final changed = <int>[];
+    for (var i = 0; i < next.length; i++) {
+      if (identical(previous[i], next[i])) continue;
+      if (changed.length >= limit) return null;
+      changed.add(i);
+    }
+    return changed;
+  }
+
+  /// Folds the replaced rows into a column's candidates in place. Returns
+  /// false when that cannot be done honestly — one of the candidates was
+  /// itself replaced, so its row may now be shorter and the true top-k is
+  /// unknown — and the column has to be scanned again.
+  ///
+  /// Clears the column's cached width when a candidate was added.
+  bool _updateCandidates<T>(
+    String id,
+    List<(int, String)> candidates,
+    List<T> rows,
+    List<int> changed,
+    String Function(T) value,
+    int k,
+  ) {
+    if (changed.isEmpty) return true;
+    for (final (index, _) in candidates) {
+      // Both short lists; the candidates are at most a few dozen.
+      if (changed.contains(index)) return false;
+    }
+    var grew = false;
+    for (final index in changed) {
+      grew = _offer(candidates, index, value(rows[index]), k) || grew;
+    }
+    if (grew) _candidateWidest.remove(id);
+    return true;
+  }
+
+  /// The up-to-[k] longest cell strings in a column, by character count, with
+  /// the row each came from.
   ///
   /// A bounded insertion into a short list kept sorted by length descending:
   /// O(rows x k) with a tiny k, and no full-column sort or intermediate list.
   /// Strings tying the k-th length are kept rather than dropped, so a genuine
   /// candidate is never discarded before it has been measured.
-  static List<String> _longestByChars<T>(
+  static List<(int, String)> _longestByChars<T>(
     List<T> rows,
     String Function(T) value,
     int k,
   ) {
-    final top = <String>[];
+    final top = <(int, String)>[];
     for (var i = 0; i < rows.length; i++) {
-      final text = value(rows[i]);
-      if (text.isEmpty) continue;
-      final length = text.length;
-      if (top.length >= k && length <= top.last.length) continue;
-
-      var position = top.length;
-      while (position > 0 && top[position - 1].length < length) {
-        position--;
-      }
-      top.insert(position, text);
-
-      while (top.length > k && top.last.length < top[k - 1].length) {
-        top.removeLast();
-      }
+      _offer(top, i, value(rows[i]), k);
     }
     return top;
+  }
+
+  /// Offers one cell to a candidate list. Returns whether it was kept.
+  static bool _offer(List<(int, String)> top, int index, String text, int k) {
+    if (text.isEmpty) return false;
+    final length = text.length;
+    if (top.length >= k && length <= top.last.$2.length) return false;
+
+    var position = top.length;
+    while (position > 0 && top[position - 1].$2.length < length) {
+      position--;
+    }
+    top.insert(position, (index, text));
+
+    while (top.length > k && top.last.$2.length < top[k - 1].$2.length) {
+      top.removeLast();
+    }
+    return true;
   }
 
   double _measure(

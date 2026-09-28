@@ -73,6 +73,7 @@ dependency beyond Flutter**.
 [Saving the layout](#saving-the-layout)
 
 **Reference**
+[Translating the grid](#translating-the-grid) ·
 [Accessibility](#accessibility) ·
 [The controller](#the-controller) ·
 [FitGrid parameters](#fitgrid-parameters) ·
@@ -174,8 +175,11 @@ without any of them being a dependency.
 
 **4. Indices are into the rows as displayed.** Every `rowIndex` the grid hands
 you — to `onRowTap`, editors, the selection, the focus — is a position in the
-filtered, sorted list, never in the page. A selection survives paging. Under a
-sort it is *not* the index into your source list; update rows by identity.
+filtered, sorted list, never in the page. The selection, the focus and an open
+editor stay on their records: a page turn leaves them alone, and a sort, a
+filter or new rows re-point their indices to where the records went (matched
+by `rowKey`, or by the row object). Under a sort an index is *not* the index
+into your source list; update rows by identity.
 
 **5. The grid never writes to your rows.** Edits, pastes, fills and undo all
 come back through your `onCommit`; you update the data and hand it back. That
@@ -203,7 +207,8 @@ Every property of `FitGridColumn<T>`:
 | `resizable` | `bool` | `true` | Whether its divider can be dragged. |
 | `reorderable` | `bool` | `true` | Whether its header can be dragged to move it. |
 | `sortable` | `bool` | `false` | Whether tapping the header sorts. |
-| `comparator` | `Comparator<T>?` | text compare | Sort order. **Supply one for numbers and dates.** |
+| `comparator` | `Comparator<T>?` | text compare | Sort order. Prefer `sortValue` for numbers and dates. |
+| `sortValue` | `Object? Function(T)?` | — | The `String`, `num`, `DateTime` or `bool` to sort by. Wins over `comparator`, and lets a large sort run off the UI thread. |
 | `searchable` | `bool` | `true` | Whether the free-text search looks at it. |
 | `filter` | `FitGridFilterSpec<T>?` | `null` | Opts into the filter UI. See [filters](#search-and-filters). |
 | `cellStyle` | `TextStyle? Function(T, int)?` | `null` | Per-cell text style, over the theme's. |
@@ -657,8 +662,35 @@ controller.clearSort();
 controller.data.sortKeys;                          // the current sort
 ```
 
-`FitGrid(multiSort: false)` turns the Shift gesture off. Always give numeric
-and date columns a `comparator`; the default compares the painted text.
+`FitGrid(multiSort: false)` turns the Shift gesture off. Give numeric and date
+columns a `sortValue` (or a `comparator`); the default compares the painted
+text.
+
+**Large sorts run in the background.** From 50,000 rows a sort goes to a
+background isolate: the keys are read out of the rows in slices on the UI
+thread, sorted on another isolate, and swapped in when ready, while the
+previous order stays on screen under a thin progress bar. It needs every key
+to be a plain value — a text column, or one with a `sortValue` returning a
+`String`, `num`, `DateTime` or `bool`. A closure `comparator` cannot cross an
+isolate, so a column with only a comparator still sorts on the UI thread.
+
+```dart
+FitGridColumn<Order>(
+  id: 'amount',
+  label: 'Amount',
+  value: (o) => o.amount.toStringAsFixed(2),
+  sortable: true,
+  sortValue: (o) => o.amount, // read once per row; sorts off the UI thread
+)
+
+controller.data.backgroundSortThreshold = 100000; // or null: never
+await controller.data.whenSorted();              // e.g. before an export
+```
+
+The sorted order covers every row and the filter is applied on top, so
+changing the filter on a sorted grid never sorts again. In a widget test, a
+background sort needs real time: wrap it in `tester.runAsync`, or set
+`backgroundSortThreshold = null`.
 
 ## Search and filters
 
@@ -699,6 +731,33 @@ Operators: `contains`, `notContains`, `equals`, `notEquals`, `startsWith`,
 case; dates compare by day. A checklist over a data source — which holds only
 the rows on screen — takes its values from `FitGridFilterSpec.values(options:
 [...])`.
+
+**A filter row under the header**, for filtering as you type:
+
+```dart
+FitGrid<Employee>(controller: controller, showFilterRow: true)
+```
+
+Each column with a `filter` spec gets a field; the rest get an empty cell.
+The fields take a short form:
+
+| Column | Typed | Means |
+|---|---|---|
+| text | `eng` · `=Engineering` · `!=Sales` | contains · equals · does not equal |
+| number | `5` · `>5` · `>=5` · `<5` · `<=5` · `!=5` · `10..20` | equals · … · between (inclusive) |
+| date | `2024-06-30` · `>2024-01-01` · `2024-01-01..2024-06-30` | by calendar day |
+| checklist | — | a button that opens the checklist dialog |
+
+The fields read and write `controller.filter`, so they show a filter set from
+the column menu, from code or from a saved layout. One the short form cannot
+say, like "starts with", shows as the field's hint until you type over it.
+Half-typed input (`>`) sets no filter rather than a wrong one. The same parser
+is public, for a filter box of your own:
+
+```dart
+FitGridColumnFilter.parse('>=50000', FitGridFilterKind.number);  // greaterOrEqual 50000
+filter.toText(FitGridFilterKind.number);                        // '>=50000', or null
+```
 
 **Free-form predicates**, when no UI is needed:
 
@@ -1120,6 +1179,50 @@ to defaults. A "reset" button is `restoreState` of a state saved at first build.
 
 ---
 
+## Translating the grid
+
+Every piece of text the grid shows or announces comes from `FitGridStrings`:
+menu items, the pager, the filter dialog and row, the empty state, and screen
+reader labels. It is English by default. To translate it, extend it and
+override what you need. Anything you leave out stays English:
+
+```dart
+class FitGridStringsDe extends FitGridStrings {
+  const FitGridStringsDe();
+
+  @override
+  String get sortAscending => 'Aufsteigend sortieren';
+  @override
+  String get hideColumn => 'Spalte ausblenden';
+  @override
+  String pageRange(int first, int last, int total) =>
+      total == 0 ? 'Keine Zeilen' : '$first–$last von $total';
+}
+```
+
+Then hand it over in one of three ways. From narrowest to widest:
+
+```dart
+FitGrid(strings: const FitGridStringsDe(), ...)                 // one grid
+
+FitGridLocalizations(strings: const FitGridStringsDe(), child: ...) // a subtree
+
+MaterialApp(localizationsDelegates: [                          // by app locale
+  ...GlobalMaterialLocalizations.delegates,
+  FitGridStringsDelegate((locale) => switch (locale.languageCode) {
+    'de' => const FitGridStringsDe(),
+    _ => const FitGridStrings(),
+  }),
+])
+```
+
+The narrowest one wins. Dialogs opened from the grid carry its strings with
+them. `showFitGridFilterDialog` and `showFitGridColumnDialog` also take
+`strings:` when you open them yourself. Your column labels, cell text and
+footer labels are already yours, so they are not part of `FitGridStrings`.
+
+---
+
 ## Accessibility
 
 Painted cells reach the accessibility tree: the render object builds a `table`
@@ -1184,6 +1287,8 @@ With one, those two arguments are ignored — update `controller.data.rows` and
 | `reorderableColumns` | `false` | Drag headers to move columns. |
 | `multiSort` | `true` | Shift+click adds a sort key. |
 | `showColumnMenu`, `columnMenuBuilder` | `false`, `null` | The per-header menu. |
+| `showFilterRow` | `false` | Filter fields under the header. |
+| `strings` | `null` | See [Translating the grid](#translating-the-grid). |
 | `columnGroups` | `[]` | Header bands. |
 | `stickyGroupHeaders` | `true` | Pin group headers while scrolling. |
 | `selectionMode`, `showSelectionColumn`, `onSelectionChanged` | `null`, `false`, `null` | Row selection. |
@@ -1233,6 +1338,8 @@ only while the grid has focus — use `autofocus: true` or tap a cell first.
 ```
 flutter test benchmark/frame_benchmark.dart
 flutter test benchmark/measurement_benchmark.dart
+flutter test benchmark/workload_benchmark.dart   # 1M rows: sort, filter, export, memory
+flutter test benchmark/stress_benchmark.dart     # 100k × 30, live updates
 ```
 
 ```
@@ -1251,6 +1358,36 @@ To keep it that way:
 - Paint rather than build: reach for `cellBuilder` only for interactive cells.
 - Wrapping rows (`contentSized` + `maxLines`) are the one real cost: clamp the
   column's width, or prefer `fixed` row heights on very large datasets.
+- Give number and date columns a `sortValue`, so a large sort can run in the
+  background (see [Sorting](#sorting)).
+
+### Sorting a million rows, next to other Flutter grids
+
+The same 1,000,000 rows, viewport and harness for every grid, each set up the
+way its own documentation shows (typed values, its own column types).
+**UI blocked** is the longest the UI thread went without drawing a frame
+during the sort; anything over 16 ms is a dropped frame.
+
+| 1,000,000 rows | fitgrid 0.1.4 | Syncfusion DataGrid 34.2.9 | TrinaGrid 2.3.0 | PlutoGrid 8.1.0 |
+|---|--:|--:|--:|--:|
+| Sort text: UI blocked | 29 ms | 3,076 ms | 2,935 ms | 2,811 ms |
+| Sort number: UI blocked | 11 ms | 2,859 ms | 2,102 ms | 14,727 ms |
+| Sort date: UI blocked | 11 ms | 2,856 ms | 9,862 ms | 8,466 ms |
+| Scroll one screen | 6.2 ms | 14.2 ms | 36.4 ms | 36.8 ms |
+| Mount + first frame | 220 ms | 105 ms | 10,521 ms | 11,414 ms |
+| Memory for the row model | 8 MB | 342 MB | 1,451 MB | 950 MB |
+
+The difference in sorting is where it happens: the others sort on the UI
+thread, and fitgrid, from 50,000 rows, on a background isolate. Measured on
+2026-09-28 in debug-mode `flutter test` on an Intel i7-14700 without a GPU, so
+absolute times are higher than a release build on a device; the comparison is
+the point. Every grid produced the same order. The method, the 100,000-row
+table and the fairness rules are in
+[`benchmark/compare/`](https://github.com/Amodh2022/fitgrid/tree/main/benchmark/compare),
+and the full report in
+[`benchmark/results/`](https://github.com/Amodh2022/fitgrid/tree/main/benchmark/results).
+To see it on your own device, open **Sorting a million rows** in the example
+app.
 
 ## Gotchas
 
@@ -1260,7 +1397,7 @@ To keep it that way:
   displayed rows; find the row by its id.
 - **Detail panels or undo lose their row after a refresh?** Set `rowKey` when
   rows are recreated as new objects.
-- **Numbers sort as text?** Add a `comparator`.
+- **Numbers sort as text?** Add a `sortValue` (or a `comparator`).
 - **`find.text` finds nothing?** Use `testing.dart`.
 - **A widget or chart column is too narrow?** Give it a `fixed` width.
 - **Nothing wraps?** `maxLines` needs `FitGridRowHeight.contentSized()` and a
@@ -1287,7 +1424,8 @@ Run it in your browser: **[fitgrid-e734.vercel.app/demo](https://fitgrid-e734.ve
 widget cells, conditional formatting, sizing with live timings, lazy loading,
 controller patterns, spreadsheet editing, columns and filters with saved
 layouts, pivot and export, detail rows, infinite scroll, reorderable rows,
-charts, grouping and tree rows, and a playground with every switch. Each page
+charts, grouping and tree rows, live updates over 100,000 rows, sorting a
+million rows with a frame meter, and a playground with every switch. Each page
 explains what to copy and what to avoid.
 
 ## Roadmap

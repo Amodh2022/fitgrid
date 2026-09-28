@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../controller/fitgrid_controller.dart';
 import '../model/fitgrid_column.dart';
+import '../theme/fitgrid_strings.dart';
 
 /// A button that opens a checklist of the grid's columns, for showing and
 /// hiding them.
@@ -17,26 +18,31 @@ class FitGridColumnChooser<T> extends StatelessWidget {
   const FitGridColumnChooser({
     required this.controller,
     this.icon = const Icon(Icons.view_column_outlined),
-    this.tooltip = 'Columns',
-    this.showAllLabel = 'Show all',
+    this.tooltip,
+    this.showAllLabel,
     super.key,
   });
 
   final FitGridController<T> controller;
   final Widget icon;
-  final String tooltip;
-  final String showAllLabel;
+
+  /// Null uses [FitGridStrings.columns].
+  final String? tooltip;
+
+  /// Null uses [FitGridStrings.showAll].
+  final String? showAllLabel;
 
   @override
   Widget build(BuildContext context) {
+    final strings = FitGridLocalizations.of(context);
     return MenuAnchor(
       menuChildren: fitGridColumnChooserItems<T>(
         controller,
-        showAllLabel: showAllLabel,
+        showAllLabel: showAllLabel ?? strings.showAll,
       ),
       builder: (context, menu, _) => IconButton(
         icon: icon,
-        tooltip: tooltip,
+        tooltip: tooltip ?? strings.columns,
         onPressed: () => menu.isOpen ? menu.close() : menu.open(),
       ),
     );
@@ -44,10 +50,10 @@ class FitGridColumnChooser<T> extends StatelessWidget {
 }
 
 /// The checklist itself, as menu items, for hosts that want it inside a menu
-/// of their own.
+/// of their own. A null [showAllLabel] uses [FitGridStrings.showAll].
 List<Widget> fitGridColumnChooserItems<T>(
   FitGridController<T> controller, {
-  String showAllLabel = 'Show all',
+  String? showAllLabel,
 }) {
   return <Widget>[
     ListenableBuilder(
@@ -83,7 +89,9 @@ List<Widget> fitGridColumnChooserItems<T>(
               MenuItemButton(
                 closeOnActivate: false,
                 onPressed: controller.columns.showAll,
-                child: Text(showAllLabel),
+                child: Text(
+                  showAllLabel ?? FitGridLocalizations.of(context).showAll,
+                ),
               ),
             ],
           ],
@@ -96,17 +104,22 @@ List<Widget> fitGridColumnChooserItems<T>(
 /// Shows the column checklist in a dialog. What the column menu's "Columns…"
 /// item opens, and usable on its own where a menu anchor is awkward — on a
 /// phone, say, where a dialog is the more natural surface.
+///
+/// Null labels come from [strings], or from [FitGridLocalizations.of] the
+/// [context] when that is null too.
 Future<void> showFitGridColumnDialog<T>(
   BuildContext context,
   FitGridController<T> controller, {
-  String title = 'Columns',
-  String showAllLabel = 'Show all',
-  String closeLabel = 'Done',
+  String? title,
+  String? showAllLabel,
+  String? closeLabel,
+  FitGridStrings? strings,
 }) {
+  final resolved = strings ?? FitGridLocalizations.of(context);
   return showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
-      title: Text(title),
+      title: Text(title ?? resolved.columns),
       contentPadding: const EdgeInsets.symmetric(vertical: 8),
       content: SizedBox(
         width: 320,
@@ -115,7 +128,7 @@ Future<void> showFitGridColumnDialog<T>(
             mainAxisSize: MainAxisSize.min,
             children: fitGridColumnChooserItems<T>(
               controller,
-              showAllLabel: showAllLabel,
+              showAllLabel: showAllLabel ?? resolved.showAll,
             ),
           ),
         ),
@@ -123,7 +136,7 @@ Future<void> showFitGridColumnDialog<T>(
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: Text(closeLabel),
+          child: Text(closeLabel ?? resolved.done),
         ),
       ],
     ),

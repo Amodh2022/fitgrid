@@ -28,6 +28,14 @@ jobs:
           flutter pub get
           flutter analyze --fatal-infos
           flutter test
+      # The website's docs page is generated from README.md; this fails when a
+      # README link points at a heading that doesn't exist.
+      - name: Build the docs page
+        working-directory: tool/docs
+        run: |
+          dart pub get
+          dart analyze --fatal-infos
+          dart run bin/build_docs.dart
 
   benchmarks:
     runs-on: ubuntu-latest
