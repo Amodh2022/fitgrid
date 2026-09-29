@@ -35,7 +35,7 @@ jobs:
       id-token: write # the OIDC token pub.dev verifies
       contents: write # the GitHub release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # A tag that disagrees with pubspec.yaml or has no CHANGELOG entry is a
       # mistake; stop before anything is uploaded.

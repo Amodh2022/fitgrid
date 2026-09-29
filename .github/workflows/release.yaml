@@ -22,7 +22,7 @@ jobs:
       contents: write # push the tag
       actions: write # dispatch publish.yaml
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Decide whether this version is new
         id: version
