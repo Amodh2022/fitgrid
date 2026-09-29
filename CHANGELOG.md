@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.1.4
+
+### Filtering and text
+
+- **A filter row.** `FitGrid.showFilterRow` puts a field under each header
+  whose column has a `filter` spec. You filter as you type: `abc` contains,
+  `=abc` equals, and on number and date columns `>5`, `<=2024-06-30` or
+  `10..20`. A checklist column gets a button that opens its dialog. The row
+  edits the same `controller.filter` as the column menu, so each shows what
+  the other set. A filter the short form can't express shows as the field's
+  hint.
+- **`FitGridColumnFilter.parse` and `toText`.** The filter row's parser and
+  formatter, public so a filter box of your own can use them.
+- **Translatable text.** `FitGridStrings` holds every string the grid shows
+  or announces: menus, pager, filter dialog and row, empty state and screen
+  reader labels. Extend it and override what you need. Supply it with
+  `FitGrid.strings`, with `FitGridLocalizations` for a subtree, or with
+  `FitGridStringsDelegate` by locale. `showFitGridFilterDialog` and
+  `showFitGridColumnDialog` take `strings:`.
+
+### Fixes
+
+- **The pager fits a phone.** Below 520 pixels it drops the "Rows" caption.
+  Below 420 it also drops the page-size picker and the first and last page
+  buttons. Before, it overflowed at phone width.
+- **A grid shorter than its header and pager clips instead of overflowing.**
+  An `Expanded` grid can get very short when a phone keyboard comes up. The
+  grid now keeps one row and clips the bottom rather than throwing a layout
+  error.
+- **Selection, focus and an open editor stay on their record.** Before, they
+  were positions: a sort, a filter or a rows update left them on whatever
+  record slid into that slot, and text typed into an open editor could be
+  committed to a different record. Now the controller re-points them to where
+  their records went, matched by `rowKey` or by the row object. A record that
+  is filtered out leaves the selection, and the focus or the editor on it
+  closes. What you have typed survives the reorder and commits to the record
+  you typed it into. `onSelectionChanged` reports the new indices.
+
+### Compatibility
+
+- `FitGridColumnChooser.tooltip` and `showAllLabel` are now nullable, and so
+  are the label parameters of `fitGridColumnChooserItems` and
+  `showFitGridColumnDialog`. Null means the translated default. Code that
+  passes them works unchanged. Code that reads the two fields as a `String`
+  needs a `!` or a fallback.
+
+Everything else is opt-in: a grid that sets neither `showFilterRow` nor
+`strings` looks and behaves as before, except for the two fixes.
+
 ## 0.1.3
 
 ### Gestures and columns

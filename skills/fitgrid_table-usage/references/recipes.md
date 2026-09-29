@@ -90,6 +90,29 @@ Operators: contains, notContains, equals, notEquals, startsWith, endsWith,
 greaterThan, greaterOrEqual, lessThan, lessOrEqual, between, inList, isEmpty,
 isNotEmpty. A filter on a hidden column stops applying until it is shown.
 
+A filter row under the header, over the same `controller.filter`:
+
+```dart
+FitGrid(showFilterRow: true, ...)   // needs columns with a `filter` spec
+// Typed: `abc` contains, `=abc`, `!=abc`; numbers/dates `>5`, `<=5`, `10..20`.
+FitGridColumnFilter.parse('>=5', FitGridFilterKind.number);   // the same parser
+```
+
+## Translating the grid
+
+```dart
+class FitGridStringsDe extends FitGridStrings {
+  const FitGridStringsDe();
+  @override
+  String get sortAscending => 'Aufsteigend sortieren';   // unset ones stay English
+}
+FitGrid(strings: const FitGridStringsDe(), ...);           // one grid
+FitGridLocalizations(strings: const FitGridStringsDe(), child: ...); // a subtree
+FitGridStringsDelegate((locale) => ...);                   // in localizationsDelegates
+```
+
+Column labels and cell text are the host's own, so they are not in `FitGridStrings`.
+
 ## Column menu and chooser
 
 ```dart

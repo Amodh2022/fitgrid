@@ -26,7 +26,10 @@ from treating it like a widget-per-cell table.
    `selection`, `focus`, `filter`, `grouping`, `pagination`, `range`,
    `details`, `editing`, `history`. Each changes independently.
 4. **Indices are into the rows as displayed** — filtered and sorted, never the
-   page. Under a sort they are not indices into the source list.
+   page. Under a sort they are not indices into the source list. The
+   selection, focus and open editor follow their records through sorts,
+   filters and row updates (by `rowKey`); their indices change, the records
+   don't.
 5. **The grid never writes to rows.** Edits, pastes, fills and undo come back
    through `FitGridEditor.onCommit`; the host updates its data and hands it
    back.
