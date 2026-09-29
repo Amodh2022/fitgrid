@@ -248,89 +248,96 @@ String _page({
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <!-- Generated from README.md by tool/docs/bin/build_docs.dart. Edit the README, not this file. -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#070b14" media="(prefers-color-scheme: dark)">
+  <script>document.documentElement.className='js';try{var t=localStorage.getItem('fitgrid-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="style.css">
   <style>
-    :root { --fg:#0f172a; --muted:#475569; --bg:#ffffff; --card:#f1f5f9; --line:#e2e8f0; --accent:#2563eb; --accent-soft:#dbeafe; }
-    @media (prefers-color-scheme: dark) { :root { --fg:#e2e8f0; --muted:#94a3b8; --bg:#0b1120; --card:#1e293b; --line:#1e293b; --accent:#60a5fa; --accent-soft:#172554; } }
-    * { box-sizing:border-box; }
-    html { scroll-padding-top:72px; }
-    body { margin:0; font:16px/1.65 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; color:var(--fg); background:var(--bg); }
-    a { color:var(--accent); }
+    /* Docs layout. Colours, type, nav, code and tables come from style.css. */
+    html { scroll-padding-top:80px; }
+    .site-nav .brand .sub { font-weight:500; color:var(--muted); }
+    #menu { display:none; }
 
-    header.top { position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:16px; height:56px; padding:0 16px; background:var(--bg); border-bottom:1px solid var(--line); }
-    header.top .brand { font-weight:700; font-size:1.1rem; color:var(--fg); text-decoration:none; }
-    header.top .brand span { color:var(--muted); font-weight:500; }
-    header.top .version { font:12px ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); background:var(--card); padding:2px 8px; border-radius:999px; }
-    header.top nav { margin-left:auto; display:flex; gap:18px; }
-    header.top nav a { color:var(--muted); text-decoration:none; font-size:.95rem; }
-    header.top nav a:hover { color:var(--fg); }
-    #menu { display:none; margin-left:auto; background:var(--card); color:var(--fg); border:0; border-radius:8px; padding:6px 12px; font:inherit; cursor:pointer; }
-
-    .layout { display:grid; grid-template-columns:272px minmax(0,1fr); max-width:1240px; margin:0 auto; }
-    aside { position:sticky; top:56px; height:calc(100vh - 56px); overflow-y:auto; padding:20px 16px 48px; border-right:1px solid var(--line); }
-    aside input { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); font:inherit; font-size:.9rem; }
-    aside input:focus { outline:2px solid var(--accent); outline-offset:-1px; }
-    aside p.group { margin:22px 0 6px; font-size:.75rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+    .layout { display:grid; grid-template-columns:280px minmax(0,1fr); max-width:1280px; margin:0 auto; }
+    aside { position:sticky; top:61px; height:calc(100vh - 61px); overflow-y:auto; padding:24px 16px 48px 24px; border-right:1px solid var(--line); }
+    aside input { width:100%; height:38px; padding:0 12px; border:1px solid var(--line); border-radius:10px; background:var(--bg-soft); color:var(--fg); font:inherit; font-size:.9rem; }
+    aside input:focus { outline:2px solid var(--accent); outline-offset:-1px; background:var(--card); }
+    aside p.group { margin:26px 0 8px; padding-left:12px; font-size:.72rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
     aside ul { list-style:none; margin:0; padding:0; }
-    aside a { display:block; padding:4px 10px; border-radius:6px; color:var(--fg); text-decoration:none; font-size:.92rem; line-height:1.4; }
-    aside a:hover { background:var(--card); }
-    aside ul ul { display:none; margin:2px 0 4px 10px; border-left:1px solid var(--line); }
-    aside ul ul a { font-size:.85rem; color:var(--muted); padding:3px 10px; }
+    aside a { display:block; padding:5px 12px; border-radius:8px; color:var(--fg); text-decoration:none; font-size:.9rem; line-height:1.4; border-left:2px solid transparent; }
+    aside a:hover { background:var(--bg-soft); color:var(--fg); }
+    aside ul ul { display:none; margin:2px 0 6px 12px; border-left:1px solid var(--line); }
+    aside ul ul a { font-size:.84rem; color:var(--muted); padding:4px 12px; border-radius:0 8px 8px 0; margin-left:-1px; }
     aside li.open > ul, aside.searching ul ul { display:block; }
-    aside a.active { background:var(--accent-soft); color:var(--accent); font-weight:600; }
-    aside .none { display:none; color:var(--muted); font-size:.9rem; margin-top:16px; }
+    aside a.active { background:var(--accent-soft); color:var(--accent-fg); font-weight:600; }
+    aside ul ul a.active { border-left-color:var(--accent); background:none; }
+    aside .none { display:none; color:var(--muted); font-size:.9rem; margin-top:16px; padding-left:12px; }
 
-    article { min-width:0; padding:32px 48px 96px; max-width:880px; }
-    article h1 { font-size:2.3rem; line-height:1.2; margin:0 0 12px; }
-    article h2 { font-size:1.6rem; margin:64px 0 12px; padding-top:8px; border-top:1px solid var(--line); }
-    article h3 { font-size:1.2rem; margin:36px 0 8px; }
+    article { min-width:0; padding:48px 56px 96px; max-width:920px; }
+    article h1 { font-size:clamp(2.2rem, 1.6rem + 2vw, 3rem); font-weight:800; letter-spacing:-.035em; margin:0 0 16px; }
+    article h2 { font-size:1.75rem; margin:80px 0 14px; padding-top:28px; border-top:1px solid var(--line); }
+    article h3 { font-size:1.2rem; margin:40px 0 10px; }
     article h2, article h3 { position:relative; }
-    .anchor { margin-left:8px; color:var(--muted); text-decoration:none; opacity:0; }
+    article p, article li { color:var(--fg); }
+    article ul, article ol { padding-left:22px; }
+    article li { margin-bottom:6px; }
+    .anchor { margin-left:8px; color:var(--muted); text-decoration:none; opacity:0; transition:opacity .15s; }
     h2:hover .anchor, h3:hover .anchor, .anchor:focus { opacity:1; }
-    .intro { font-size:1.08rem; }
+    .intro { font-size:1.06rem; }
     .intro > p:first-of-type { font-size:1.2rem; color:var(--muted); }
-    .buttons a { display:inline-block; margin:8px 8px 0 0; padding:9px 16px; border-radius:8px; background:var(--accent); color:#fff; text-decoration:none; font-weight:600; font-size:.95rem; }
-    .buttons a.secondary { background:var(--card); color:var(--fg); }
-    img { max-width:100%; height:auto; border-radius:12px; border:1px solid var(--line); }
-    code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.88em; }
-    :not(pre) > code { background:var(--card); padding:.12em .38em; border-radius:5px; }
-    pre { position:relative; background:var(--card); padding:16px; border-radius:10px; overflow-x:auto; line-height:1.5; }
+    .intro img { border:1px solid var(--line); border-radius:var(--radius-lg); box-shadow:var(--shadow-lg); margin:24px 0; }
+    .buttons { display:flex; flex-wrap:wrap; gap:10px; margin:24px 0 8px; }
+    .buttons a { display:inline-flex; align-items:center; height:40px; padding:0 16px; border-radius:10px; font-weight:600; font-size:.92rem; text-decoration:none; color:#fff; background:linear-gradient(135deg, #2563eb, #6d4aea); box-shadow:0 6px 20px var(--glow); }
+    .buttons a:hover { color:#fff; }
+    .buttons a.secondary { color:var(--fg); background:var(--card); border:1px solid var(--line); box-shadow:none; }
+    .buttons a.secondary:hover { background:var(--card-hover); }
+    article img { border-radius:var(--radius); border:1px solid var(--line); }
+    article pre { margin:18px 0; }
     pre code.hljs { background:none; padding:0; }
-    pre button.copy { position:absolute; top:8px; right:8px; padding:3px 10px; font:12px system-ui,sans-serif; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--muted); cursor:pointer; opacity:0; transition:opacity .15s; }
-    pre:hover button.copy, pre button.copy:focus { opacity:1; }
-    .table { overflow-x:auto; margin:16px 0; }
-    table { border-collapse:collapse; width:100%; font-size:.92rem; }
-    th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
-    th { background:var(--card); }
-    blockquote { margin:16px 0; padding:4px 16px; border-left:4px solid var(--accent); background:var(--card); border-radius:0 8px 8px 0; }
-    hr { border:0; border-top:1px solid var(--line); margin:32px 0; }
-    footer { color:var(--muted); margin-top:64px; font-size:.9rem; border-top:1px solid var(--line); padding-top:16px; }
+    .table { margin:18px 0; overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--card); }
+    .table table { font-size:.9rem; }
+    blockquote { margin:18px 0; padding:12px 18px; border:1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-left:3px solid var(--accent); background:var(--accent-soft); border-radius:0 var(--radius) var(--radius) 0; }
+    blockquote p:last-child { margin-bottom:0; }
+    hr { border:0; border-top:1px solid var(--line); margin:40px 0; }
+    article footer { color:var(--muted); margin-top:80px; font-size:.9rem; border-top:1px solid var(--line); padding-top:20px; }
 
     @media (max-width:900px) {
-      header.top nav { display:none; }
-      #menu { display:block; }
+      #menu { display:inline-flex; align-items:center; height:36px; padding:0 12px; border:1px solid var(--line); border-radius:9px; background:var(--card); color:var(--fg); font:500 .88rem/1 var(--font); cursor:pointer; }
       .layout { display:block; }
-      aside { display:none; position:fixed; top:56px; left:0; right:0; bottom:0; height:auto; z-index:9; background:var(--bg); border-right:0; }
+      aside { display:none; position:fixed; top:61px; left:0; right:0; bottom:0; height:auto; z-index:19; background:var(--bg); border-right:0; padding:20px 16px 48px; }
       body.nav-open aside { display:block; }
       body.nav-open { overflow:hidden; }
-      article { padding:24px 16px 72px; }
-      article h1 { font-size:1.8rem; }
+      article { padding:28px 16px 72px; }
+      article h2 { margin-top:56px; }
       .anchor { display:none; }
     }
   </style>
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="./">fitgrid <span>docs</span></a>
-  ${version.isEmpty ? '' : '<span class="version">v$version</span>'}
-  <nav>
-    <a href="demo/">Live demo</a>
-    <a href="https://pub.dev/documentation/fitgrid_table/latest/">API reference</a>
-    <a href="https://pub.dev/packages/fitgrid_table">pub.dev</a>
-    <a href="$_repo">GitHub</a>
-  </nav>
-  <button id="menu" aria-expanded="false" aria-controls="sidebar">Contents</button>
+<header class="site-nav always-line">
+  <div class="bar" style="padding:0 16px;max-width:1280px;margin:0 auto">
+    <a class="brand" href="./" aria-label="fitgrid home">
+      <span class="logo" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.6"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M1.5 6.5h13M6 6.5v7"/></svg></span>
+      fitgrid <span class="sub">docs</span>
+    </a>
+    ${version.isEmpty ? '' : '<a class="pill" href="https://pub.dev/packages/fitgrid_table">v$version</a>'}
+    <nav class="nav-links" aria-label="Main">
+      <a href="docs.html" aria-current="page">Docs</a>
+      <a href="demo/">Demo</a>
+      <a href="choosing-a-flutter-data-table.html">Compare</a>
+      <a href="https://pub.dev/documentation/fitgrid_table/latest/">API</a>
+      <a href="https://pub.dev/packages/fitgrid_table">pub.dev</a>
+    </nav>
+    <div class="nav-tools">
+      <button id="menu" type="button" aria-expanded="false" aria-controls="sidebar">Contents</button>
+      <a class="icon-btn gh" href="$_repo" aria-label="fitgrid on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
+      <button class="icon-btn theme-toggle" type="button" aria-label="Toggle theme"><svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
+      <button class="icon-btn nav-menu" type="button" aria-label="Menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    </div>
+  </div>
 </header>
 <div class="layout">
   <aside id="sidebar" aria-label="Contents">
@@ -358,6 +365,7 @@ $body
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dart.min.js"></script>
+<script src="site.js" defer></script>
 <script>
   // Code: highlight, and a copy button on each block.
   document.querySelectorAll('pre > code').forEach(function (code) {
