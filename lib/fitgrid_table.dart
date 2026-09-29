@@ -115,6 +115,8 @@ export 'src/model/row_height.dart'
 export 'src/sizing/column_layout.dart' show FitGridColumnLayout;
 export 'src/sizing/row_metrics.dart'
     show FitGridMeasuredRowMetrics, FitGridRowMetrics, FitGridUniformRowMetrics;
+export 'src/theme/fitgrid_strings.dart'
+    show FitGridLocalizations, FitGridStrings, FitGridStringsDelegate;
 export 'src/theme/fitgrid_theme.dart' show FitGridTheme, FitGridThemeData;
 export 'src/widgets/fitgrid.dart' show FitGrid, FitGridContextMenuTarget;
 export 'src/widgets/fitgrid_column_chooser.dart'
@@ -123,6 +125,7 @@ export 'src/widgets/fitgrid_column_chooser.dart'
         fitGridColumnChooserItems,
         showFitGridColumnDialog;
 export 'src/widgets/fitgrid_filter_dialog.dart' show showFitGridFilterDialog;
+export 'src/widgets/fitgrid_filter_row.dart' show FitGridFilterRow;
 export 'src/widgets/fitgrid_footer.dart' show FitGridFooter;
 export 'src/widgets/fitgrid_header.dart' show FitGridHeader;
 export 'src/widgets/fitgrid_intents.dart'

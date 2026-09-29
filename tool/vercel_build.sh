@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds the website for Vercel: the static pages in site/, the screenshots,
-# and the example gallery for the web under /demo/, all into _site/.
+# Builds the website for Vercel: the static pages in site/, the docs page
+# generated from README.md, the screenshots, and the example gallery for the
+# web under /demo/, all into _site/.
 #
 # Vercel's build machines have no Flutter, so it is fetched here when missing.
 set -euo pipefail
@@ -14,6 +15,12 @@ fi
   cd example
   flutter pub get
   flutter build web --release --base-href /demo/
+)
+
+(
+  cd tool/docs
+  dart pub get
+  dart run bin/build_docs.dart
 )
 
 rm -rf _site

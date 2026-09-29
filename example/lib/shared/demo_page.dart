@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// The app-wide brightness, so every demo page can offer the same toggle
@@ -48,25 +50,54 @@ class DemoPage extends StatelessWidget {
         title: Text(title),
         actions: [...actions, const ThemeModeButton()],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _NotesPanel(notes: notes),
-          if (controls != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: controls,
-            ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: child,
-            ),
-          ),
-        ],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final header = <Widget>[
+            _NotesPanel(notes: notes, maxHeight: constraints.maxHeight * 0.32),
+            if (controls != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: controls,
+              ),
+          ];
+
+          // One shape whatever the height, so nothing is rebuilt when the
+          // keyboard comes up: a field that loses its element loses its focus,
+          // and the keyboard goes straight back down. The notes and controls
+          // take their natural height while the grid keeps at least
+          // [_minGridHeight]; on a short screen, a phone with the keyboard
+          // up say, they are capped and scroll instead.
+          final grid = Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: child,
+          );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: math.max(
+                    0.0,
+                    constraints.maxHeight - _minGridHeight,
+                  ),
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: header,
+                  ),
+                ),
+              ),
+              Expanded(child: grid),
+            ],
+          );
+        },
       ),
     );
   }
+
+  /// The least height the grid keeps, however much the page above wants.
+  static const double _minGridHeight = 320;
 }
 
 /// Flips the app between light and dark.
@@ -93,9 +124,12 @@ class ThemeModeButton extends StatelessWidget {
 }
 
 class _NotesPanel extends StatelessWidget {
-  const _NotesPanel({required this.notes});
+  const _NotesPanel({required this.notes, required this.maxHeight});
 
   final List<DemoNote> notes;
+
+  /// The tallest the open panel's list may get.
+  final double maxHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -114,9 +148,9 @@ class _NotesPanel extends StatelessWidget {
             ConstrainedBox(
               // The grid is the point of every page; the notes must never
               // push it off a small screen.
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(context).height * 0.32,
-              ),
+              // Measured against the room the page has, not the screen, so the
+              // keyboard coming up shrinks it too.
+              constraints: BoxConstraints(maxHeight: maxHeight),
               child: ListView(
                 shrinkWrap: true,
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),

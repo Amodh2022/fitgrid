@@ -9,3 +9,7 @@ pubspec.lock
 
 # Vercel build output
 _site/
+
+# Generated from README.md by tool/docs/bin/build_docs.dart
+site/docs.html
+.claude/

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../controller/fitgrid_controller.dart';
 import '../model/column_filter.dart';
 import '../model/fitgrid_column.dart';
+import '../theme/fitgrid_strings.dart';
 
 /// Opens the filter editor for one column.
 ///
@@ -10,18 +11,31 @@ import '../model/fitgrid_column.dart';
 /// toolbar, say — for any column that has a [FitGridColumn.filter] spec. The
 /// result goes straight to `controller.filter`, so the grid, the header glyph
 /// and any attached data source all follow without the caller doing anything.
+///
+/// Its text comes from [strings], or from [FitGridLocalizations.of] the
+/// [context] when that is null.
 Future<void> showFitGridFilterDialog<T>(
   BuildContext context,
   FitGridController<T> controller,
-  String columnId,
-) async {
+  String columnId, {
+  FitGridStrings? strings,
+}) async {
   final column = controller.columns.byId(columnId);
   final spec = column?.filter;
   if (column == null || spec == null) return;
+  // The dialog is pushed on the navigator, outside whatever scope [context]
+  // was in, so the strings are carried across rather than looked up there.
+  final resolved = strings ?? FitGridLocalizations.of(context);
   await showDialog<void>(
     context: context,
-    builder: (context) =>
-        _FilterDialog<T>(controller: controller, column: column, spec: spec),
+    builder: (context) => FitGridLocalizations(
+      strings: resolved,
+      child: _FilterDialog<T>(
+        controller: controller,
+        column: column,
+        spec: spec,
+      ),
+    ),
   );
 }
 
@@ -52,6 +66,7 @@ class _FilterDialogState<T> extends State<_FilterDialog<T>> {
   String? _error;
 
   FitGridFilterSpec<T> get _spec => widget.spec;
+  FitGridStrings get _strings => FitGridLocalizations.of(context);
 
   @override
   void initState() {
@@ -144,9 +159,9 @@ class _FilterDialogState<T> extends State<_FilterDialog<T>> {
                   value2 == null))) {
         setState(() {
           _error = switch (_spec.kind) {
-            FitGridFilterKind.number => 'Enter a number',
-            FitGridFilterKind.date => 'Enter a date as YYYY-MM-DD',
-            _ => 'Enter a value',
+            FitGridFilterKind.number => _strings.enterNumber,
+            FitGridFilterKind.date => _strings.enterDate,
+            _ => _strings.enterValue,
           };
         });
         return;
@@ -191,11 +206,11 @@ class _FilterDialogState<T> extends State<_FilterDialog<T>> {
           : TextInputType.text,
       decoration: InputDecoration(
         labelText: label,
-        hintText: date ? 'YYYY-MM-DD' : null,
+        hintText: date ? _strings.dateHint : null,
         isDense: true,
         suffixIcon: date
             ? IconButton(
-                tooltip: 'Pick a date',
+                tooltip: _strings.pickDate,
                 icon: const Icon(Icons.calendar_today_outlined, size: 18),
                 onPressed: () => _pickDate(field),
               )
@@ -216,10 +231,13 @@ class _FilterDialogState<T> extends State<_FilterDialog<T>> {
         DropdownButtonFormField<FitGridFilterOperator>(
           initialValue: _operator,
           isDense: true,
-          decoration: const InputDecoration(labelText: 'Condition'),
+          decoration: InputDecoration(labelText: _strings.condition),
           items: <DropdownMenuItem<FitGridFilterOperator>>[
             for (final op in _spec.operators)
-              DropdownMenuItem(value: op, child: Text(op.label)),
+              DropdownMenuItem(
+                value: op,
+                child: Text(_strings.filterOperator(op)),
+              ),
           ],
           onChanged: (op) => setState(() => _operator = op ?? _operator),
         ),
@@ -227,12 +245,14 @@ class _FilterDialogState<T> extends State<_FilterDialog<T>> {
           const SizedBox(height: 12),
           _field(
             _value,
-            _operator == FitGridFilterOperator.between ? 'From' : 'Value',
+            _operator == FitGridFilterOperator.between
+                ? _strings.from
+                : _strings.value,
           ),
         ],
         if (_operator == FitGridFilterOperator.between) ...<Widget>[
           const SizedBox(height: 12),
-          _field(_value2, 'To'),
+          _field(_value2, _strings.to),
         ],
         if (_error != null) ...<Widget>[
           const SizedBox(height: 8),
@@ -259,9 +279,9 @@ class _FilterDialogState<T> extends State<_FilterDialog<T>> {
       children: <Widget>[
         TextField(
           controller: _search,
-          decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.search, size: 18),
-            hintText: 'Search values',
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.search, size: 18),
+            hintText: _strings.searchValues,
             isDense: true,
           ),
           onChanged: (_) => setState(() {}),
@@ -277,7 +297,11 @@ class _FilterDialogState<T> extends State<_FilterDialog<T>> {
               ? null
               : false,
           tristate: true,
-          title: Text(query.isEmpty ? '(Select all)' : '(Select all shown)'),
+          title: Text(
+            query.isEmpty
+                ? _strings.selectAllValues
+                : _strings.selectAllShownValues,
+          ),
           onChanged: (_) => setState(() {
             if (allShownChecked) {
               _checked.removeAll(shown);
@@ -299,7 +323,7 @@ class _FilterDialogState<T> extends State<_FilterDialog<T>> {
                 dense: true,
                 controlAffinity: ListTileControlAffinity.leading,
                 value: _checked.contains(option),
-                title: Text(option.isEmpty ? '(Blank)' : option),
+                title: Text(option.isEmpty ? _strings.blankValue : option),
                 onChanged: (on) => setState(() {
                   if (on ?? false) {
                     _checked.add(option);
@@ -322,7 +346,9 @@ class _FilterDialogState<T> extends State<_FilterDialog<T>> {
     );
     return AlertDialog(
       title: Text(
-        'Filter ${widget.column.label.isEmpty ? widget.column.id : widget.column.label}',
+        _strings.filterDialogTitle(
+          widget.column.label.isEmpty ? widget.column.id : widget.column.label,
+        ),
       ),
       content: SizedBox(
         width: 320,
@@ -331,12 +357,12 @@ class _FilterDialogState<T> extends State<_FilterDialog<T>> {
             : _conditionEditor(),
       ),
       actions: <Widget>[
-        if (active) TextButton(onPressed: _clear, child: const Text('Clear')),
+        if (active) TextButton(onPressed: _clear, child: Text(_strings.clear)),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(_strings.cancel),
         ),
-        FilledButton(onPressed: _apply, child: const Text('Apply')),
+        FilledButton(onPressed: _apply, child: Text(_strings.apply)),
       ],
     );
   }

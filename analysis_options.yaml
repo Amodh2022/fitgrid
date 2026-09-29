@@ -9,6 +9,11 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
+    # Its own package with its own dependencies; see tool/docs/pubspec.yaml.
+    - tool/docs/**
+    # Also its own package, depending on the grids it compares against; see
+    # benchmark/compare/pubspec.yaml.
+    - benchmark/compare/**
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options

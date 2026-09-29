@@ -1,0 +1,9 @@
+name: fitgrid_docs
+description: Builds the website's docs page from the package README.
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  markdown: ^7.3.0

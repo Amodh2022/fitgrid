@@ -8,6 +8,7 @@ import '../model/enums.dart';
 import '../model/fitgrid_column.dart';
 import '../model/sort_key.dart';
 import '../sizing/column_layout.dart';
+import '../theme/fitgrid_strings.dart';
 import '../theme/fitgrid_theme.dart';
 
 /// The pinned header row.
@@ -697,7 +698,9 @@ class _HeaderCell<T> extends StatelessWidget {
                   // label folds into the header's and the button vanishes.
                   container: true,
                   button: true,
-                  label: '${column.label} column menu',
+                  label: FitGridLocalizations.of(
+                    context,
+                  ).columnMenuLabel(column.label),
                   child: InkResponse(
                     radius: theme.sortIconSize,
                     onTap: () => onMenu!(anchor),
@@ -728,6 +731,7 @@ class _HeaderCell<T> extends StatelessWidget {
     // carries resize handles and drag targets, which are neither. The flag
     // announces the same thing without demanding a structure the header does
     // not have.
+    final strings = FitGridLocalizations.of(context);
     Widget cell = Semantics(
       header: true,
       // No `label` here: the cell already contains a `Text` with the same
@@ -737,12 +741,12 @@ class _HeaderCell<T> extends StatelessWidget {
       hint: onTap == null
           ? null
           : switch (direction) {
-                  FitGridSortDirection.ascending => 'sorted ascending',
-                  FitGridSortDirection.descending => 'sorted descending',
-                  FitGridSortDirection.none => 'not sorted',
+                  FitGridSortDirection.ascending => strings.sortedAscending,
+                  FitGridSortDirection.descending => strings.sortedDescending,
+                  FitGridSortDirection.none => strings.notSorted,
                 } +
                 (sortPriority >= 0
-                    ? ', sort priority ${sortPriority + 1}'
+                    ? strings.sortPriority(sortPriority + 1)
                     : ''),
       child: _divided(
         InkWell(

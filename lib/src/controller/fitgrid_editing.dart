@@ -14,8 +14,9 @@ class FitGridEditingState extends ChangeNotifier {
   String? _columnId;
   String? _error;
 
-  /// Index into the full row list of the cell being edited, or null when
-  /// nothing is. Global, not page-local, so an open editor survives a sort.
+  /// Index into the rows as displayed of the cell being edited, or null when
+  /// nothing is. Global, not page-local, and re-pointed when the view is
+  /// reordered, so an open editor stays on its record through a sort.
   int? get rowIndex => _rowIndex;
 
   /// Id of the column being edited, or null.
@@ -37,6 +38,16 @@ class FitGridEditingState extends ChangeNotifier {
     _rowIndex = rowIndex;
     _columnId = columnId;
     _error = null;
+    notifyListeners();
+  }
+
+  /// Moves the open editor to [rowIndex] after the view has been reordered,
+  /// so it stays on the same record. Unlike [begin], a validation message
+  /// stays: the user is still looking at the value that was rejected.
+  @internal
+  void follow(int rowIndex) {
+    if (_rowIndex == null || _rowIndex == rowIndex) return;
+    _rowIndex = rowIndex;
     notifyListeners();
   }
 

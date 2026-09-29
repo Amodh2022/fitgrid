@@ -13,3 +13,8 @@ marketing/
 .github/
 _site/
 tool/vercel_build.sh
+# Compares against other grids and depends on them; never part of the package.
+benchmark/compare/
+tool/docs/
+benchmark/compare/
+benchmark/results/

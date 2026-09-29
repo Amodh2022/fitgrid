@@ -1,0 +1,20 @@
+name: fitgrid_compare_bench
+description: Head-to-head sort benchmark of fitgrid, Syncfusion DataGrid and PlutoGrid/TrinaGrid. Not published.
+publish_to: none
+
+environment:
+  sdk: ^3.8.0
+  flutter: ">=3.32.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  fitgrid_table:
+    path: ../..
+  syncfusion_flutter_datagrid: any
+  trina_grid: any
+  pluto_grid: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

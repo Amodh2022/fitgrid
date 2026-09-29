@@ -6,15 +6,16 @@ import 'package:flutter/foundation.dart';
 /// list, and the whole point of the focus model is that Tab, the arrow keys,
 /// Enter-to-edit and copy all agree about where "here" is.
 ///
-/// The row is an index into the *whole* dataset and the column is an id, for
-/// the same reason the selection is: a page turn, a sort or a hidden column
-/// must not silently move the focus to whatever has taken that position.
+/// The row is an index into the rows as displayed and the column is an id,
+/// for the same reason the selection is: a page turn, a sort or a hidden
+/// column must not silently move the focus to whatever has taken that
+/// position. The controller re-points the row when the view is reordered.
 class FitGridFocusState extends ChangeNotifier {
   int? _rowIndex;
   String? _columnId;
 
-  /// Focused row, by index into the full row list, or null when nothing is
-  /// focused.
+  /// Focused row, by index into the rows as displayed, or null when nothing
+  /// is focused.
   int? get rowIndex => _rowIndex;
 
   /// Focused column id, or null.

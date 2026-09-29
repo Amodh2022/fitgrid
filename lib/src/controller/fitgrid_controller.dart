@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:collection';
+
 import 'package:flutter/foundation.dart';
 
 import '../model/enums.dart';
@@ -14,24 +17,38 @@ import 'fitgrid_history.dart';
 import 'fitgrid_pagination.dart';
 import 'fitgrid_range.dart';
 import 'fitgrid_saved_state.dart';
+import 'fitgrid_sort.dart';
 
 /// Rows, and the ordering applied to them.
 ///
-/// [view] is the list the grid actually renders: [rows] with the active sort
-/// applied. It is recomputed when the rows or the sort change and cached in
+/// [view] is the list the grid actually renders: [rows] sorted, then filtered.
+/// It is recomputed when the rows, the sort or the filter change and cached in
 /// between, because the render layer asks for row *i* many times per frame.
+///
+/// The sorted order covers every row and the filter is applied on top of it,
+/// so changing the filter never sorts again: narrowing a sorted list keeps it
+/// sorted. A large sort runs on a background isolate — see
+/// [backgroundSortThreshold].
 class FitGridDataState<T> extends ChangeNotifier {
   FitGridDataState({List<T> rows = const []}) : _rows = List<T>.of(rows);
 
   List<T> _rows;
+  List<T>? _rowsView;
   List<T>? _view;
   FitGridRowPredicate<T>? _filter;
 
   /// The rows as supplied, in their original order.
-  List<T> get rows => List<T>.unmodifiable(_rows);
+  ///
+  /// The same object until the rows are replaced, so a cache can key on its
+  /// identity: column widths are measured against this list rather than the
+  /// sorted, filtered view, which is what keeps a sort or a filter from
+  /// re-measuring every column.
+  List<T> get rows => _rowsView ??= UnmodifiableListView<T>(_rows);
 
   set rows(List<T> value) {
     _rows = List<T>.of(value);
+    _rowsView = null;
+    _sorted = null;
     _view = null;
     notifyListeners();
   }
@@ -50,6 +67,61 @@ class FitGridDataState<T> extends ChangeNotifier {
 
   List<FitGridSortKey> _sortKeys = const <FitGridSortKey>[];
   List<Comparator<T>> _comparators = <Comparator<T>>[];
+  List<Object? Function(T row)?> _sortValues = const [];
+
+  /// Bumped by every change to the sort, so a background result can tell
+  /// whether it is still the one wanted.
+  int _sortVersion = 0;
+
+  /// The last order computed in the background: indices into [_orderRows],
+  /// for the sort of [_orderVersion].
+  Int32List? _order;
+  List<T>? _orderRows;
+  int _orderVersion = -1;
+
+  /// Every row in sorted order — exact, or the last known order while a
+  /// background sort catches up.
+  List<T>? _sorted;
+
+  /// The last sorted list handed out, and the rows it holds. While a new sort
+  /// runs over the same rows, this is shown as it is rather than rebuilt: a
+  /// million-row copy is a frame's worth of work on its own.
+  List<T>? _shown;
+  List<T>? _shownRows;
+
+  bool _sortRunning = false;
+  int? _failedVersion;
+  Completer<void>? _settled;
+  bool _disposed = false;
+
+  /// Sorts of at least this many rows run on a background isolate, so a click
+  /// on a header over a million rows never stalls a frame. Null keeps every
+  /// sort on the UI thread.
+  ///
+  /// Only a sort whose every key can be read out as a plain value goes to the
+  /// background: a column sorted by its text, or one with a
+  /// `FitGridColumn.sortValue`. A closure comparator cannot cross an isolate,
+  /// so a column with only a `comparator` sorts on the UI thread as before.
+  ///
+  /// While the background sort runs, [view] keeps the order it had — or, as
+  /// rows are replaced, the last order applied to the new rows — and
+  /// [isSorting] is true. Replaced rows can sit a sort out of place until the
+  /// next result lands; there is never more than one sort in flight, and the
+  /// newest request is the one that runs next.
+  int? backgroundSortThreshold = 50000;
+
+  /// Whether a background sort is running, so [view] is showing the previous
+  /// order. Read it after [view]: reading the view is what starts the sort.
+  bool get isSorting => _sortRunning;
+
+  /// Completes once [view] reflects the current sort — at once when nothing
+  /// is running in the background. What an export of a just-sorted million
+  /// rows, or a test, waits on.
+  Future<void> whenSorted() {
+    view;
+    if (!_sortRunning) return Future<void>.value();
+    return (_settled ??= Completer<void>()).future;
+  }
 
   /// The active sort, highest priority first. Empty when unsorted.
   List<FitGridSortKey> get sortKeys => _sortKeys;
@@ -107,14 +179,38 @@ class FitGridDataState<T> extends ChangeNotifier {
   /// Ties on every key keep their original relative order: the sort is
   /// stable, so "by department, then by name" never shuffles two people with
   /// the same name in the same department.
-  void sortBy(List<FitGridSortKey> keys, List<Comparator<T>> comparators) {
+  ///
+  /// [sortValues], parallel to [keys] when given, reads a key's value out of
+  /// a row — a `String`, `num`, `DateTime` or `bool`, empty first. A key with
+  /// one is read once per row rather than twice per comparison, and a sort
+  /// whose every key has one can run in the background (see
+  /// [backgroundSortThreshold]). Its comparator must order the same way; it
+  /// is used only where no value function is given.
+  void sortBy(
+    List<FitGridSortKey> keys,
+    List<Comparator<T>> comparators, {
+    List<Object? Function(T row)?>? sortValues,
+  }) {
     assert(keys.length == comparators.length);
+    assert(sortValues == null || sortValues.length == keys.length);
     assert(
       keys.every((key) => key.direction != FitGridSortDirection.none),
       'An unsorted column is left out of the keys, not given `none`.',
     );
     _sortKeys = List<FitGridSortKey>.unmodifiable(keys);
     _comparators = List<Comparator<T>>.of(comparators);
+    _sortValues = sortValues == null
+        ? List<Object? Function(T row)?>.filled(keys.length, null)
+        : List<Object? Function(T row)?>.of(sortValues);
+    _sortVersion++;
+    // Back to unsorted forgets the order, so the next sort starts from the
+    // rows as supplied rather than from some earlier, unrelated order.
+    if (keys.isEmpty) {
+      _order = null;
+      _shown = null;
+      _shownRows = null;
+    }
+    _sorted = null;
     _view = null;
     notifyListeners();
   }
@@ -133,8 +229,15 @@ class FitGridDataState<T> extends ChangeNotifier {
   /// [rows] — the supplied order, not the view.
   void moveRow(int from, int to) {
     if (from == to || from < 0 || from >= _rows.length) return;
-    final row = _rows.removeAt(from);
-    _rows.insert(to.clamp(0, _rows.length), row);
+    // A new list rather than a move in place: an unsorted view *is* the rows
+    // list, and the controller compares the view before and after to carry
+    // the selection along with the moved record.
+    final rows = List<T>.of(_rows);
+    final row = rows.removeAt(from);
+    rows.insert(to.clamp(0, rows.length), row);
+    _rows = rows;
+    _rowsView = null;
+    _sorted = null;
     _view = null;
     notifyListeners();
   }
@@ -145,14 +248,145 @@ class FitGridDataState<T> extends ChangeNotifier {
     // copy of it: downstream caches are keyed on its identity, so copying here
     // would invalidate the column measurement on every build.
     if (filter == null && _sortKeys.isEmpty) return _rows;
-    final base = filter == null
-        ? _rows
-        : <T>[
-            for (final row in _rows)
-              if (filter(row)) row,
-          ];
-    if (_sortKeys.isEmpty) return base;
-    return _stableSort(base);
+    final sorted = _sortKeys.isEmpty ? _rows : (_sorted ??= _remember());
+    if (filter == null) return sorted;
+    return <T>[
+      for (final row in sorted)
+        if (filter(row)) row,
+    ];
+  }
+
+  List<T> _remember() {
+    final sorted = _buildSorted();
+    _shown = sorted;
+    _shownRows = _rows;
+    return sorted;
+  }
+
+  List<T> _buildSorted() {
+    final rows = _rows;
+    final order = _order;
+    if (order != null &&
+        identical(_orderRows, rows) &&
+        _orderVersion == _sortVersion) {
+      return _inOrder(order, rows);
+    }
+    final threshold = backgroundSortThreshold;
+    if (threshold == null ||
+        rows.length < threshold ||
+        _failedVersion == _sortVersion ||
+        _sortValues.any((value) => value == null)) {
+      return _stableSort(rows);
+    }
+    _sortInBackground();
+    // Until it lands: what is on screen when the rows are the same, the last
+    // order there was fitted to the rows as they are now, or the rows as
+    // supplied when there has not been one.
+    final shown = _shown;
+    if (shown != null && identical(_shownRows, rows)) return shown;
+    if (order == null) return rows;
+    return _inOrder(_fitted(order, rows.length), rows);
+  }
+
+  static List<T> _inOrderOf<T>(Int32List order, List<T> rows) =>
+      List<T>.generate(order.length, (i) => rows[order[i]], growable: false);
+
+  List<T> _inOrder(Int32List order, List<T> rows) => _inOrderOf(order, rows);
+
+  /// [order] made a permutation of [length] rows: rows past the end dropped,
+  /// rows that are new appended in the order supplied.
+  static Int32List _fitted(Int32List order, int length) {
+    if (order.length == length) return order;
+    final fitted = Int32List(length);
+    var at = 0;
+    for (final index in order) {
+      if (index < length) fitted[at++] = index;
+    }
+    for (var index = order.length; index < length; index++) {
+      fitted[at++] = index;
+    }
+    return fitted;
+  }
+
+  /// Reads the keys out of the rows, slice by slice, then sorts them on
+  /// another isolate. One at a time: a request made while one runs is picked
+  /// up when it finishes, by which point only the newest request matters.
+  void _sortInBackground() {
+    if (_sortRunning) return;
+    _sortRunning = true;
+    final rows = _rows;
+    final version = _sortVersion;
+    final keys = _sortKeys;
+    final values = _sortValues;
+
+    Future<void> run() async {
+      Int32List? order;
+      List<T>? sorted;
+      try {
+        final columns = <FitGridSortColumn>[];
+        for (var k = 0; k < keys.length; k++) {
+          final column = await fitGridReadSortColumn<T>(
+            rows,
+            values[k]!,
+            descending: keys[k].descending,
+            cancelled: () => _disposed || version != _sortVersion,
+          );
+          if (column == null) break;
+          columns.add(column);
+        }
+        if (columns.length == keys.length) {
+          order = await fitGridSortInBackground(columns);
+        }
+        // Laid out in row order in slices too, so the frame that swaps it in
+        // does not spend a million-row copy doing it.
+        if (order != null &&
+            version == _sortVersion &&
+            identical(rows, _rows) &&
+            !_disposed) {
+          sorted = await fitGridInOrder(
+            order,
+            rows,
+            cancelled: () => _disposed || version != _sortVersion,
+          );
+        }
+      } on Object catch (error, stack) {
+        // Most likely a sort value of a kind that cannot be sent — a record,
+        // say, or a mix of kinds in one column. The UI-thread sort reports it
+        // properly the next time the view is read.
+        _failedVersion = version;
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stack,
+            library: 'fitgrid',
+            context: ErrorDescription('while sorting in the background'),
+          ),
+        );
+      }
+      _sortRunning = false;
+      if (_disposed) return;
+      if (order != null && version == _sortVersion) {
+        _order = order;
+        _orderRows = rows;
+        _orderVersion = version;
+      }
+      // Whether the result is exact, a head start on rows that have since been
+      // replaced, or superseded by a newer sort, the view is rebuilt — and
+      // rebuilding it starts the next sort if one is still wanted.
+      _sorted = sorted != null && identical(rows, _rows) ? sorted : null;
+      if (_sorted != null) {
+        _shown = _sorted;
+        _shownRows = rows;
+      }
+      _view = null;
+      notifyListeners();
+      if (!_sortRunning) {
+        _settled?.complete();
+        _settled = null;
+      }
+    }
+
+    unawaited(run());
   }
 
   /// Dart's `List.sort` is not stable, and a multi-key sort leans on
@@ -161,15 +395,38 @@ class FitGridDataState<T> extends ChangeNotifier {
   List<T> _stableSort(List<T> base) {
     final keys = _sortKeys;
     final comparators = _comparators;
+    // Decorated once up front: a key with a value function is read n times
+    // here instead of 2·n·log n times inside the sort.
+    final values = <List<Object?>?>[
+      for (final value in _sortValues)
+        value == null
+            ? null
+            : List<Object?>.generate(
+                base.length,
+                (i) => value(base[i]),
+                growable: false,
+              ),
+    ];
     final order = List<int>.generate(base.length, (i) => i);
     order.sort((a, b) {
       for (var k = 0; k < keys.length; k++) {
-        final result = comparators[k](base[a], base[b]);
+        final decorated = values[k];
+        final result = decorated != null
+            ? fitGridCompareSortValues(decorated[a], decorated[b])
+            : comparators[k](base[a], base[b]);
         if (result != 0) return keys[k].descending ? -result : result;
       }
       return a - b;
     });
     return <T>[for (final i in order) base[i]];
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _settled?.complete();
+    _settled = null;
+    super.dispose();
   }
 }
 
@@ -368,9 +625,11 @@ class FitGridColumnState<T> extends ChangeNotifier {
 
 /// Which rows are selected, and how many may be.
 ///
-/// Indices are into the full row list, never into the page: a selection that
-/// reattached to whatever now sits in position 3 after a page turn is worse
-/// than no selection at all.
+/// Indices are into the rows as displayed, never into the page: a selection
+/// that reattached to whatever now sits in position 3 after a page turn is
+/// worse than no selection at all. For the same reason the controller
+/// re-points them when a sort, a filter or new rows reorder the view, so the
+/// selection stays on its records.
 class FitGridSelectionState extends ChangeNotifier {
   final Set<int> _selected = <int>{};
 
@@ -492,6 +751,18 @@ class FitGridSelectionState extends ChangeNotifier {
     _anchor = null;
     notifyListeners();
   }
+
+  /// Re-points the selection after the view has been reordered, so it stays
+  /// on the same records. Unlike [select], the anchor is carried across
+  /// rather than reset to the last index.
+  @internal
+  void follow(Set<int> selected, int? anchor) {
+    _selected
+      ..clear()
+      ..addAll(selected);
+    _anchor = anchor;
+    notifyListeners();
+  }
 }
 
 /// The grid's state, in one place.
@@ -517,6 +788,8 @@ class FitGridController<T> {
     // The page must survive a sort but not a resize of the dataset, so the
     // pager follows the data rather than being driven from the widget.
     data.addListener(() => pagination.rowCount = data.length);
+    _lastView = data.view;
+    data.addListener(_followRecords);
     // Filtering is derived, not stored twice: the filter state holds the user's
     // intent, and this is the one place it turns into a predicate the data
     // state can apply. Columns take part because the search reads them.
@@ -533,13 +806,67 @@ class FitGridController<T> {
     data.filter = next;
   }
 
+  /// The view the selection, focus and editor indices currently point into.
+  late List<T> _lastView;
+
+  /// Carries the selection, the focus and the open editor across a change to
+  /// the view — a sort, a filter, new rows — so they stay on the records they
+  /// were on rather than on whatever now sits at the same positions.
+  ///
+  /// Records are matched by `FitGrid.rowKey`, or by the row itself. A record
+  /// that has left the view leaves the selection; the focus clears and the
+  /// editor closes if theirs has.
+  void _followRecords() {
+    final old = _lastView;
+    final next = data.view;
+    _lastView = next;
+    if (identical(old, next)) return;
+    final focusRow = focus.rowIndex;
+    final editRow = editing.rowIndex;
+    if (selection.isEmpty && focusRow == null && editRow == null) return;
+
+    final keyOf = history.keyOf;
+    final byKey = <Object, int>{
+      for (var i = 0; i < next.length; i++) keyOf(next[i]): i,
+    };
+    int? follow(int? index) => index == null || index < 0 || index >= old.length
+        ? null
+        : byKey[keyOf(old[index])];
+
+    if (selection.isNotEmpty || selection.anchor != null) {
+      final selected = <int>{for (final i in selection.selected) ?follow(i)};
+      final anchor = follow(selection.anchor);
+      if (!setEquals(selected, selection.selected) ||
+          anchor != selection.anchor) {
+        selection.follow(selected, anchor);
+      }
+    }
+    if (focusRow != null) {
+      final moved = follow(focusRow);
+      if (moved == null) {
+        focus.clear();
+      } else {
+        focus.moveTo(moved, focus.columnId!);
+      }
+    }
+    if (editRow != null) {
+      final moved = follow(editRow);
+      if (moved == null) {
+        editing.cancel();
+      } else {
+        editing.follow(moved);
+      }
+    }
+  }
+
   /// Rows and their ordering.
   final FitGridDataState<T> data;
 
   /// Column order, visibility and widths.
   final FitGridColumnState<T> columns;
 
-  /// Selected rows, by index into the full row list — not the page.
+  /// Selected rows, by index into the rows as displayed — not the page. They
+  /// follow their records when the view is reordered.
   final FitGridSelectionState selection = FitGridSelectionState();
 
   /// Which cell is open for editing, if any.
@@ -646,7 +973,9 @@ class FitGridController<T> {
     if (column == null || !column.sortable) return;
     final next = data.nextDirectionFor(columnId);
     if (!additive) {
-      data.sort(columnId, next, column.compare);
+      setSort(<FitGridSortKey>[
+        if (next != FitGridSortDirection.none) FitGridSortKey(columnId, next),
+      ]);
       return;
     }
     final keys = <FitGridSortKey>[
@@ -669,6 +998,7 @@ class FitGridController<T> {
   void setSort(List<FitGridSortKey> keys) {
     final kept = <FitGridSortKey>[];
     final comparators = <Comparator<T>>[];
+    final values = <Object? Function(T row)?>[];
     final seen = <String>{};
     for (final key in keys) {
       if (key.direction == FitGridSortDirection.none) continue;
@@ -678,8 +1008,9 @@ class FitGridController<T> {
       }
       kept.add(key);
       comparators.add(column.compare);
+      values.add(column.sortValueOf);
     }
-    data.sortBy(kept, comparators);
+    data.sortBy(kept, comparators, sortValues: values);
   }
 
   /// Removes every sort key, returning the rows to their supplied order.
@@ -770,6 +1101,7 @@ class FitGridController<T> {
 
   void dispose() {
     _reveal = null;
+    data.removeListener(_followRecords);
     filter.removeListener(_applyFilter);
     columns.removeListener(_applyFilter);
     data.dispose();
