@@ -66,6 +66,15 @@ from treating it like a widget-per-cell table.
 - Listen to the one notifier you need (`controller.history`,
   `controller.range`, …) with `ListenableBuilder`; do not rebuild the grid
   from outside to reflect its own state.
+- **Large sorts and filters run in the background.** From
+  `backgroundSortThreshold` / `backgroundFilterThreshold` rows (50,000 by
+  default) they run across frames: `data.view` still holds the previous rows
+  and `isSorting` / `isFiltering` is true. `await controller.data.whenSorted()`
+  before reading `data.view` or exporting after setting a sort or filter.
+- The default context menu (copy, show only / hide value, clear filters, sort,
+  expand / collapse groups) is `target.defaultItems`. A `contextMenuBuilder`
+  spreads it to add items; returning null keeps the defaults, an empty list
+  shows no menu.
 
 ### Theming
 
@@ -128,6 +137,8 @@ from treating it like a widget-per-cell table.
   headers only.
 - On a grid with editable columns a single tap waits out the double-tap
   window: `await tester.pump(const Duration(milliseconds: 400))` after `tapAt`.
+- A background sort or filter needs real time: wrap it in `tester.runAsync`
+  and await `whenSorted()`, or set both thresholds to `null` in the test.
 
 ## Gotchas
 
@@ -142,6 +153,7 @@ from treating it like a widget-per-cell table.
 | `rows:` changes ignored | A controller is supplied; update the controller. |
 | Stack overflow when searching | A searchable column reads `data.view`. |
 | Shortcut does nothing | The grid does not have focus. |
+| `data.view` or export misses a new filter on a big grid | It runs in the background; await `controller.data.whenSorted()`. |
 
 ## Examples
 

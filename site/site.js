@@ -1,5 +1,5 @@
 // Shared behaviour for the fitgrid website: theme toggle, mobile menu,
-// copy buttons and tabs. Every page works without it.
+// copy buttons, tabs and feature clips. Every page works without it.
 (function () {
   var root = document.documentElement;
 
@@ -95,4 +95,50 @@
       });
     });
   });
+  // ---------- Clips ----------
+  // Each clip plays only while it is on screen, and not at all for people who
+  // ask for less motion: they get the poster and can open a clip to play it.
+  var clips = document.querySelectorAll('video.clip');
+  var still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (clips.length && !still && 'IntersectionObserver' in window) {
+    var seen = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        var v = entry.target;
+        if (entry.isIntersecting) {
+          v.preload = 'auto';
+          var p = v.play();
+          if (p && p.catch) p.catch(function () { /* autoplay refused: the poster stays */ });
+        } else {
+          v.pause();
+        }
+      });
+    }, { threshold: 0.35 });
+    clips.forEach(function (v) { seen.observe(v); });
+  }
+
+  // A clip in a card is small; clicking it plays it large, with controls.
+  var shots = document.querySelectorAll('button.shot');
+  if (shots.length && typeof HTMLDialogElement === 'function') {
+    var dialog = document.createElement('dialog');
+    dialog.className = 'clip-dialog';
+    dialog.innerHTML = '<video controls playsinline loop muted></video>' +
+      '<form method="dialog"><span></span><button type="submit">Close</button></form>';
+    document.body.appendChild(dialog);
+    var big = dialog.querySelector('video');
+    var caption = dialog.querySelector('span');
+    shots.forEach(function (shot) {
+      shot.addEventListener('click', function () {
+        var small = shot.querySelector('video');
+        big.src = small.currentSrc || small.src;
+        big.poster = small.poster;
+        big.setAttribute('aria-label', small.getAttribute('aria-label'));
+        caption.textContent = small.getAttribute('aria-label');
+        dialog.showModal();
+        var p = big.play();
+        if (p && p.catch) p.catch(function () {});
+      });
+    });
+    dialog.addEventListener('click', function (e) { if (e.target === dialog) dialog.close(); });
+    dialog.addEventListener('close', function () { big.pause(); big.removeAttribute('src'); big.load(); });
+  }
 })();

@@ -692,6 +692,19 @@ changing the filter on a sorted grid never sorts again. In a widget test, a
 background sort needs real time: wrap it in `tester.runAsync`, or set
 `backgroundSortThreshold = null`.
 
+Filters work the same way from 50,000 rows: the search and column filters run
+in slices across frames, the previous rows stay on screen with the same thin
+progress bar, and a keystroke that only extends the search filters the last
+result rather than every row. A filter predicate is a closure, so it stays on
+the UI thread; slicing is what keeps each frame short. A case-insensitive
+search there is answered from an index of each row's text, built once across
+frames and reused until the rows or the visible columns change.
+
+```dart
+controller.data.backgroundFilterThreshold = 100000; // or null: never
+await controller.data.whenSorted(); // waits for the sort and the filter
+```
+
 ## Search and filters
 
 **Free-text search** runs over every `searchable` column, and matches are
@@ -1123,16 +1136,25 @@ the bytes is up to you (a file, a download, a share sheet). For anything else,
 write your own exporter over `FitGridExportData`; `fitGridParseDelimited` reads
 CSV/TSV back.
 
-A right-click or long-press opens a context menu (just "Copy" by default):
+A right-click or long-press opens a context menu. By default it offers, where
+each applies: Copy, Copy with headers and Copy cell; Show only or Hide the value
+under the pointer (on a column with a `filter` spec) and Clear all filters;
+Sort ascending or descending by the column; Expand or Collapse all groups.
+
+Add your own items with `contextMenuBuilder`, keeping the defaults by
+spreading `target.defaultItems`:
 
 ```dart
 contextMenuBuilder: (context, target) => [
+  ...target.defaultItems,
+  const PopupMenuDivider(),
   PopupMenuItem(child: const Text('Delete'), onTap: () => delete(target.selection)),
 ],
 ```
 
-`target` carries the row, its index, the column, the position and the
-selection; returning `null` suppresses the menu.
+`target` carries the row, its index, the column, the position, the selection
+and the default items. Returning `null` shows the defaults; returning an empty
+list shows no menu.
 
 ## Pivots
 

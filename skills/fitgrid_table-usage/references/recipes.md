@@ -273,7 +273,10 @@ final data = controller.export(selectedOnly: false);
 final csv = fitGridToCsv(data);
 final tsv = fitGridToTsv(data);
 final Uint8List xlsx = fitGridToXlsx(data, sheetName: 'Report');
+// Keep the grid's own items (copy, filter to value, sort, groups) and add yours.
 FitGrid(contextMenuBuilder: (context, target) => [
+  ...target.defaultItems,
+  const PopupMenuDivider(),
   PopupMenuItem(child: const Text('Delete'), onTap: () => delete(target.selection)),
 ])
 ```

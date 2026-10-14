@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.1.5
+
+### Performance
+
+- **Large filters no longer stall the UI.** From
+  `FitGridDataState.backgroundFilterThreshold` rows (50,000 by default) the
+  search and column filters run in slices across frames, like a background
+  sort: the previous rows stay on screen, the progress bar shows, and
+  `isFiltering` is true until the result lands. A filter set while one runs
+  replaces it.
+- **Typing into the search filters the last result.** When the search text
+  only grew and nothing else changed, the next pass scans the rows the last
+  one kept rather than every row.
+- **Case-insensitive search allocates nothing for ASCII text.** It used to
+  lower-case the query and every cell for each row checked.
+- **A search index for large grids.** On a grid that filters in the
+  background, a case-insensitive search reads each row's searchable text once,
+  lower case, into chunked strings, and later searches run one native
+  `indexOf` per match instead of a call per cell. The index is built across
+  frames and reused until the rows list or the visible columns change. Rows
+  replaced on every tick of a live feed are searched directly until they hold
+  still.
+
+### Context menu
+
+- **A useful default menu.** Without a `contextMenuBuilder`, a right-click or
+  long-press now offers, where each applies: Copy, Copy with headers and Copy
+  cell; Show only “value” and Hide “value” for a column with a `filter` spec,
+  and Clear all filters; Sort ascending and descending; Expand and Collapse
+  all groups. Before, it offered only Copy.
+- **`FitGridContextMenuTarget.defaultItems`.** The grid's own items, so a
+  `contextMenuBuilder` can spread them into its menu and add to the defaults
+  rather than replace them.
+- **`FitGridStrings`** gains `copyWithHeaders`, `copyCell`,
+  `filterToValue(value)`, `filterOutValue(value)`, `clearAllFilters`,
+  `expandAllGroups` and `collapseAllGroups`.
+
+### Changes
+
+- `whenSorted()` now also waits for a background filter, so after it the
+  view reflects both the sort and the filter. A filter on 50,000 rows or more
+  is no longer applied by the time `filter.query = …` returns: await
+  `whenSorted()` before reading `data.view` or exporting, or set
+  `backgroundFilterThreshold = null` for the old behaviour.
+- A `contextMenuBuilder` that returns null now gets the default menu, as
+  documented; return an empty list to show no menu for that target. A grid
+  with no builder shows the longer default menu above.
+
 ## 0.1.4
 
 ### Filtering and text

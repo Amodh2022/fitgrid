@@ -214,14 +214,15 @@ void main() {
     //  - frame: the frame that then shows it.
     // The `id` column has only a closure comparator, which cannot cross an
     // isolate, so it is the UI-thread sort for comparison.
-    Future<void> sortRun(
+    Future<void> settleRun(
       Samples stall,
       Samples total,
       Samples frame,
-      List<FitGridSortKey> keys,
+      void Function() reset,
+      void Function() apply,
     ) async {
       for (var run = 0; run < 3; run++) {
-        controller.clearSort();
+        reset();
         await tester.pump();
         await tester.runAsync(() async {
           final watch = Stopwatch()..start();
@@ -233,7 +234,7 @@ void main() {
             last = now;
           }
 
-          controller.setSort(keys);
+          apply();
           controller.data.view;
           tick();
           var done = false;
@@ -249,6 +250,19 @@ void main() {
       }
       total.rssAfter = rss;
     }
+
+    Future<void> sortRun(
+      Samples stall,
+      Samples total,
+      Samples frame,
+      List<FitGridSortKey> keys,
+    ) => settleRun(
+      stall,
+      total,
+      frame,
+      controller.clearSort,
+      () => controller.setSort(keys),
+    );
 
     final sorts = <Samples>[];
     for (final (label, keys) in <(String, List<FitGridSortKey>)>[
@@ -291,22 +305,14 @@ void main() {
     await tester.pump();
 
     // ---- Filtering ----------------------------------------------------------
+    // From 50,000 rows a filter runs in slices across frames, so the same
+    // three numbers as a sort: longest UI stall, until shown, and the frame.
     Future<void> filterRun(
-      Samples data,
+      Samples stall,
+      Samples total,
       Samples frame,
       void Function() apply,
-    ) async {
-      for (var run = 0; run < 3; run++) {
-        controller.filter.clear();
-        await tester.pump();
-        await data.time(() async {
-          apply();
-          return controller.data.view;
-        });
-        await frame.time(() => tester.pump());
-      }
-      data.rssAfter = rss;
-    }
+    ) => settleRun(stall, total, frame, controller.filter.clear, apply);
 
     final filters = <Samples>[];
     var matched = <String, int>{};
@@ -349,11 +355,12 @@ void main() {
         },
       ),
     ]) {
-      final data = Samples('Filter $label: apply + build view');
+      final stall = Samples('Filter $label: longest UI stall');
+      final total = Samples('Filter $label: until shown');
       final frame = Samples('Filter $label: frame');
-      await filterRun(data, frame, apply);
+      await filterRun(stall, total, frame, apply);
       matched[label] = controller.data.length;
-      filters.addAll(<Samples>[data, frame]);
+      filters.addAll(<Samples>[stall, total, frame]);
     }
 
     // Filter and sort together: the order is kept for every row and the
@@ -384,27 +391,54 @@ void main() {
     filterSortData.rssAfter = rss;
     filters.addAll(<Samples>[filterSortData, filterSortFrame]);
 
-    // Search as you type: every keystroke re-filters a million rows, so the
-    // per-keystroke latency is the number a user feels.
+    // Search as you type, at a fast typist's pace. Two numbers: the longest
+    // the UI thread stalled while a keystroke was being filtered — what
+    // decides whether the typing itself drops frames — and, after the last
+    // key, how long until the results are on screen.
+    const typed = 'customer 1234';
+    const keyGap = Duration(milliseconds: 80);
+    Future<void> typingRun(Samples stall, Samples settle) async {
+      for (var round = 0; round < 2; round++) {
+        await tester.runAsync(() async {
+          for (var i = 1; i <= typed.length; i++) {
+            final watch = Stopwatch()..start();
+            var last = 0;
+            var longest = 0;
+            void tick() {
+              final now = watch.elapsedMicroseconds;
+              longest = math.max(longest, now - last);
+              last = now;
+            }
+
+            controller.filter.query = typed.substring(0, i);
+            controller.data.view;
+            tick();
+            final lastKey = i == typed.length;
+            var done = false;
+            unawaited(controller.data.whenSorted().then((_) => done = true));
+            while (lastKey ? !done : watch.elapsed < keyGap) {
+              await Future<void>.delayed(Duration.zero);
+              tick();
+            }
+            stall.add(longest);
+            if (lastKey) settle.add(watch.elapsedMicroseconds);
+          }
+        });
+        await tester.pump();
+        expect(controller.data.isFiltering, isFalse);
+        controller.filter.query = '';
+        await tester.pump();
+      }
+      settle.rssAfter = rss;
+    }
+
     controller.filter.clear();
     controller.clearSort();
     await tester.pump();
-    final keystroke = Samples(
-      'Search-as-you-type, per keystroke (filter + frame)',
-    );
-    const typed = 'customer 1234';
-    for (var round = 0; round < 2; round++) {
-      for (var i = 1; i <= typed.length; i++) {
-        await keystroke.time(() async {
-          controller.filter.query = typed.substring(0, i);
-          await tester.pump();
-        });
-      }
-      controller.filter.query = '';
-      await tester.pump();
-    }
-    keystroke.rssAfter = rss;
-    filters.add(keystroke);
+    final keystroke = Samples('Search-as-you-type: longest UI stall per key');
+    final typedSettle = Samples('Search-as-you-type: last key until shown');
+    await typingRun(keystroke, typedSettle);
+    filters.addAll(<Samples>[keystroke, typedSettle]);
 
     // The same typing over a sorted grid: the order is kept for all rows and
     // the filter applied on top, so a keystroke never sorts again.
@@ -419,20 +453,17 @@ void main() {
     });
     await tester.pump();
     final sortedKeystroke = Samples(
-      'Search-as-you-type on a sorted grid, per keystroke',
+      'Search-as-you-type on a sorted grid: longest UI stall per key',
     );
-    for (var i = 1; i <= typed.length; i++) {
-      await sortedKeystroke.time(() async {
-        controller.filter.query = typed.substring(0, i);
-        await tester.pump();
-      });
-      expect(controller.data.isSorting, isFalse);
-    }
+    final sortedSettle = Samples(
+      'Search-as-you-type on a sorted grid: last key until shown',
+    );
+    await typingRun(sortedKeystroke, sortedSettle);
+    expect(controller.data.isSorting, isFalse);
     controller.filter.query = '';
     controller.clearSort();
     await tester.pump();
-    sortedKeystroke.rssAfter = rss;
-    filters.add(sortedKeystroke);
+    filters.addAll(<Samples>[sortedKeystroke, sortedSettle]);
 
     // ---- Export -------------------------------------------------------------
     final exports = <Samples>[];
@@ -455,10 +486,14 @@ void main() {
     }
 
     await exportRun('all $rowCount rows');
-    controller.filter.setFilter(
-      'status',
-      const FitGridColumnFilter.oneOf(<String>{'Returned'}),
-    );
+    // A large filter lands in the background; an export waits for it.
+    await tester.runAsync(() {
+      controller.filter.setFilter(
+        'status',
+        const FitGridColumnFilter.oneOf(<String>{'Returned'}),
+      );
+      return controller.data.whenSorted();
+    });
     await tester.pump();
     final filteredCount = controller.data.length;
     await exportRun('filtered ($filteredCount rows)');
