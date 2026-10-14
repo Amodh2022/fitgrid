@@ -11,6 +11,7 @@ import '../controller/fitgrid_history.dart';
 import '../controller/fitgrid_pagination.dart';
 import '../controller/fitgrid_range.dart';
 import '../export/fitgrid_export.dart';
+import '../model/column_filter.dart';
 import '../model/column_group.dart';
 import '../model/column_width.dart';
 import '../model/data_source.dart';
@@ -50,6 +51,7 @@ class FitGridContextMenuTarget<T> {
     required this.columnId,
     required this.position,
     required this.selection,
+    this.defaultItems = const <PopupMenuEntry<void>>[],
   });
 
   /// The row under the pointer, or null if the pointer missed the rows.
@@ -66,6 +68,13 @@ class FitGridContextMenuTarget<T> {
 
   /// The rows selected at the moment the menu opened, by global index.
   final Set<int> selection;
+
+  /// The items the grid shows when there is no `contextMenuBuilder`: copy,
+  /// copy with headers and copy cell; show only or hide the value under the
+  /// pointer, and clear filters; sort by the column; expand or collapse every
+  /// group. Each appears only where it applies. Spread them into a menu of
+  /// your own to add to the defaults rather than replace them.
+  final List<PopupMenuEntry<void>> defaultItems;
 }
 
 /// A data grid that measures its columns and paints its cells.
@@ -461,7 +470,8 @@ class FitGrid<T> extends StatefulWidget {
   final Color? Function(T row, int rowIndex)? rowColor;
 
   /// Builds the menu shown on a right-click or long-press. Returning null
-  /// suppresses the menu for that target.
+  /// shows the grid's own items, [FitGridContextMenuTarget.defaultItems];
+  /// returning an empty list shows no menu for that target.
   final List<PopupMenuEntry<void>>? Function(
     BuildContext context,
     FitGridContextMenuTarget<T> target,
@@ -1254,11 +1264,12 @@ class _FitGridState<T> extends State<FitGrid<T>> {
         child: Stack(
           children: [
             _fitFrame(frame, constraints, theme, showsFilterRow, columns),
-            // A page being fetched, or a large sort still running in the
-            // background while the previous order stays on screen. Read after
-            // the view, which is what starts the sort.
+            // A page being fetched, or a large sort or filter still running
+            // in the background while the previous rows stay on screen. Read
+            // after the view, which is what starts them.
             if ((source != null && source.isLoading && rowsView.isNotEmpty) ||
-                (source == null && controller.data.isSorting))
+                (source == null &&
+                    (controller.data.isSorting || controller.data.isFiltering)))
               Positioned(
                 left: 0,
                 right: 0,
@@ -1742,19 +1753,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       String label,
       IconData? icon,
       VoidCallback? onTap,
-    ) => PopupMenuItem<void>(
-      enabled: onTap != null,
-      onTap: onTap,
-      child: Row(
-        children: <Widget>[
-          SizedBox(
-            width: 28,
-            child: icon == null ? null : Icon(icon, size: theme.sortIconSize),
-          ),
-          Flexible(child: Text(label)),
-        ],
-      ),
-    );
+    ) => _menuItem(theme, label, icon, onTap);
 
     void sortTo(FitGridSortDirection to) {
       controller.setSort(
@@ -2749,23 +2748,23 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       _controller.selection.applyGesture(globalRow);
     }
 
+    final column = hit == null ? null : columns[hit.$2];
+    final defaults = _contextMenuDefaults(
+      columns,
+      rows,
+      row,
+      column == null || _isSynthetic(column) ? null : column,
+    );
     final target = FitGridContextMenuTarget<T>(
       row: row,
       rowIndex: globalRow,
-      columnId: hit == null ? null : columns[hit.$2].id,
+      columnId: column?.id,
       position: globalPosition,
       selection: _controller.selection.selected,
+      defaultItems: defaults,
     );
 
-    final items =
-        widget.contextMenuBuilder?.call(context, target) ??
-        <PopupMenuEntry<void>>[
-          if (widget.enableCopy)
-            PopupMenuItem<void>(
-              onTap: () => _copy(columns, rows),
-              child: Text(_strings.copy),
-            ),
-        ];
+    final items = widget.contextMenuBuilder?.call(context, target) ?? defaults;
     if (items.isEmpty || !context.mounted) return;
 
     final overlay =
@@ -2779,6 +2778,180 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       items: items,
     );
   }
+
+  /// The grid's own context menu for a right-click on [row] in [column],
+  /// either null when the pointer missed it.
+  List<PopupMenuEntry<void>> _contextMenuDefaults(
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows,
+    T? row,
+    FitGridColumn<T>? column,
+  ) {
+    final controller = _controller;
+    final strings = _strings;
+    final theme = widget.theme ?? FitGridTheme.of(context);
+    PopupMenuItem<void> item(
+      String label,
+      IconData? icon,
+      VoidCallback onTap,
+    ) => _menuItem(theme, label, icon, onTap);
+
+    final copies = <PopupMenuEntry<void>>[
+      if (widget.enableCopy) ...<PopupMenuEntry<void>>[
+        item(strings.copy, Icons.copy_outlined, () => _copy(columns, rows)),
+        item(
+          strings.copyWithHeaders,
+          null,
+          () => _copy(columns, rows, headers: true),
+        ),
+        if (row != null && column != null)
+          item(
+            strings.copyCell,
+            null,
+            () =>
+                Clipboard.setData(ClipboardData(text: column.copyTextFor(row))),
+          ),
+      ],
+    ];
+
+    final filters = <PopupMenuEntry<void>>[];
+    final spec = column?.filter;
+    if (row != null && column != null && spec != null) {
+      final text = column.value(row);
+      final typed = spec.typedValueOf(row);
+      final blank = typed == null && text.trim().isEmpty;
+      final shown = _menuValue(blank ? strings.blankValue : text);
+      final (only, out) = switch (spec.kind) {
+        _ when blank => (
+          const FitGridColumnFilter(operator: FitGridFilterOperator.isEmpty),
+          const FitGridColumnFilter(operator: FitGridFilterOperator.isNotEmpty),
+        ),
+        FitGridFilterKind.checklist => (
+          FitGridColumnFilter.oneOf(<String>{text}),
+          null,
+        ),
+        FitGridFilterKind.text => (
+          FitGridColumnFilter(
+            operator: FitGridFilterOperator.equals,
+            value: text,
+          ),
+          FitGridColumnFilter(
+            operator: FitGridFilterOperator.notEquals,
+            value: text,
+          ),
+        ),
+        FitGridFilterKind.number || FitGridFilterKind.date => (
+          FitGridColumnFilter(
+            operator: FitGridFilterOperator.equals,
+            value: typed,
+          ),
+          FitGridColumnFilter(
+            operator: FitGridFilterOperator.notEquals,
+            value: typed,
+          ),
+        ),
+      };
+      filters
+        ..add(
+          item(
+            strings.filterToValue(shown),
+            theme.filterIcon,
+            () => controller.filter.setFilter(column.id, only),
+          ),
+        )
+        ..addAll(<PopupMenuEntry<void>>[
+          if (out != null)
+            item(
+              strings.filterOutValue(shown),
+              null,
+              () => controller.filter.setFilter(column.id, out),
+            ),
+        ]);
+    }
+    if (controller.filter.filters.isNotEmpty ||
+        controller.filter.columnFilters.isNotEmpty) {
+      filters.add(
+        item(
+          strings.clearAllFilters,
+          null,
+          controller.filter.clearColumnFilters,
+        ),
+      );
+    }
+
+    final sorts = <PopupMenuEntry<void>>[
+      if (column != null && column.sortable) ...<PopupMenuEntry<void>>[
+        for (final (label, icon, direction)
+            in <(String, IconData, FitGridSortDirection)>[
+              (
+                strings.sortAscending,
+                theme.sortAscendingIcon,
+                FitGridSortDirection.ascending,
+              ),
+              (
+                strings.sortDescending,
+                theme.sortDescendingIcon,
+                FitGridSortDirection.descending,
+              ),
+            ])
+          if (controller.data.sortKeys.length != 1 ||
+              controller.data.directionOf(column.id) != direction)
+            item(label, icon, () {
+              controller.setSort(<FitGridSortKey>[
+                FitGridSortKey(column.id, direction),
+              ]);
+              widget.dataSource?.sortByKeys(controller.data.sortKeys);
+            }),
+      ],
+    ];
+
+    final groups = <PopupMenuEntry<void>>[
+      if (controller.grouping.groups.isNotEmpty) ...<PopupMenuEntry<void>>[
+        item(strings.expandAllGroups, null, controller.grouping.expandAll),
+        item(strings.collapseAllGroups, null, controller.grouping.collapseAll),
+      ],
+    ];
+
+    final sections = <List<PopupMenuEntry<void>>>[
+      copies,
+      filters,
+      sorts,
+      groups,
+    ].where((section) => section.isNotEmpty).toList();
+    return <PopupMenuEntry<void>>[
+      for (var i = 0; i < sections.length; i++) ...<PopupMenuEntry<void>>[
+        if (i > 0) const PopupMenuDivider(),
+        ...sections[i],
+      ],
+    ];
+  }
+
+  /// A cell's text cut short enough to sit in a menu item's label.
+  static String _menuValue(String text) {
+    final line = text.split('\n').first.trim();
+    final characters = line.characters;
+    return characters.length <= 24 ? line : '${characters.take(23)}…';
+  }
+
+  /// A menu item with room for an icon, so labels line up with or without one.
+  PopupMenuItem<void> _menuItem(
+    FitGridThemeData theme,
+    String label,
+    IconData? icon,
+    VoidCallback? onTap,
+  ) => PopupMenuItem<void>(
+    enabled: onTap != null,
+    onTap: onTap,
+    child: Row(
+      children: <Widget>[
+        SizedBox(
+          width: 28,
+          child: icon == null ? null : Icon(icon, size: theme.sortIconSize),
+        ),
+        Flexible(child: Text(label)),
+      ],
+    ),
+  );
 
   // -------------------------------------------------------------- keyboard
 
@@ -3108,10 +3281,17 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   /// TSV rather than CSV because that is what a spreadsheet accepts on paste
   /// without an import dialog, and because a grid's job here is to get the
   /// numbers into the other window, not to define a file format.
-  void _copy(List<FitGridColumn<T>> columns, FitGridRowsView<T> rows) {
+  ///
+  /// With [headers], the column labels come first, and a single focused cell
+  /// copies its whole row: a header over one value is a label, not a table.
+  void _copy(
+    List<FitGridColumn<T>> columns,
+    FitGridRowsView<T> rows, {
+    bool headers = false,
+  }) {
     final range = _controller.range.range;
     if (widget.cellSelection && range != null && !range.isSingleCell) {
-      return _copyRange(range, columns, rows);
+      return _copyRange(range, columns, rows, headers: headers);
     }
     final copyable = <FitGridColumn<T>>[
       for (final column in columns)
@@ -3129,12 +3309,15 @@ class _FitGridState<T> extends State<FitGrid<T>> {
 
     // A single focused cell copies that cell; a selection copies whole rows.
     // Anything else surprises somebody.
-    final singleCell = selected.isEmpty;
+    final singleCell = selected.isEmpty && !headers;
     final focusedColumn = _focusedColumnIndex(columns);
 
     final buffer = StringBuffer();
+    if (headers) {
+      buffer.write(copyable.map((c) => _escapeCell(c.label)).join('\t'));
+    }
     for (var i = 0; i < indices.length; i++) {
-      if (i > 0) buffer.write('\n');
+      if (i > 0 || headers) buffer.write('\n');
       final row = _rowForGlobalIndex(indices[i]);
       if (row == null) continue;
       if (singleCell && focusedColumn >= 0) {
@@ -3155,12 +3338,17 @@ class _FitGridState<T> extends State<FitGrid<T>> {
   void _copyRange(
     FitGridCellRange range,
     List<FitGridColumn<T>> columns,
-    FitGridRowsView<T> rows,
-  ) {
+    FitGridRowsView<T> rows, {
+    bool headers = false,
+  }) {
     final cols = _rangeColumns(range, columns);
     if (cols.isEmpty) return;
     final buffer = StringBuffer();
     var first = true;
+    if (headers) {
+      buffer.write(cols.map((c) => _escapeCell(c.label)).join('\t'));
+      first = false;
+    }
     for (final index in _rangeRows(range, rows)) {
       final row = _rowForGlobalIndex(index);
       if (row == null) continue;

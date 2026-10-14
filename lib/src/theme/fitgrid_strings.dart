@@ -76,6 +76,18 @@ class FitGridStrings {
   String get clearSelection => 'Clear selection';
   String get loading => 'Loading';
   String get copy => 'Copy';
+  String get copyWithHeaders => 'Copy with headers';
+  String get copyCell => 'Copy cell';
+
+  /// The context menu item that filters a column to the value right-clicked.
+  /// [value] is already shortened to fit a menu.
+  String filterToValue(String value) => 'Show only “$value”';
+
+  /// The context menu item that filters the value right-clicked out.
+  String filterOutValue(String value) => 'Hide “$value”';
+  String get clearAllFilters => 'Clear all filters';
+  String get expandAllGroups => 'Expand all groups';
+  String get collapseAllGroups => 'Collapse all groups';
   String get noRows => 'No rows';
   String get couldNotLoadRows => 'Could not load rows';
 

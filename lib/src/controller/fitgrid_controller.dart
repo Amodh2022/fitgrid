@@ -17,6 +17,7 @@ import 'fitgrid_history.dart';
 import 'fitgrid_pagination.dart';
 import 'fitgrid_range.dart';
 import 'fitgrid_saved_state.dart';
+import 'fitgrid_search_index.dart';
 import 'fitgrid_sort.dart';
 
 /// Rows, and the ordering applied to them.
@@ -58,12 +59,77 @@ class FitGridDataState<T> extends ChangeNotifier {
   /// Set by the controller from the filter state rather than by a host
   /// directly, so that "what is on screen" has exactly one derivation.
   FitGridRowPredicate<T>? get filter => _filter;
-  set filter(FitGridRowPredicate<T>? value) {
+  set filter(FitGridRowPredicate<T>? value) => setFilter(value);
+
+  /// Sets [filter]. Pass [narrows] when every row [value] keeps, the previous
+  /// filter kept too — the search text only grew, say — so the filter can scan
+  /// the previous result rather than every row.
+  ///
+  /// [search] with [rest] is the same filter split in two: a search a large
+  /// pass can answer from a search index, and the predicate for everything
+  /// else, null when nothing else narrows.
+  void setFilter(
+    FitGridRowPredicate<T>? value, {
+    bool narrows = false,
+    FitGridSearch<T>? search,
+    FitGridRowPredicate<T>? rest,
+  }) {
     if (identical(_filter, value)) return;
     _filter = value;
+    _search = value == null ? null : search;
+    _rest = rest;
+    _filterVersion++;
+    if (!narrows) _canNarrow = false;
     _view = null;
     notifyListeners();
   }
+
+  /// Bumped by every change to the filter, so a background pass can tell
+  /// whether it is still the one wanted.
+  int _filterVersion = 0;
+
+  FitGridSearch<T>? _search;
+  FitGridRowPredicate<T>? _rest;
+
+  /// The search text of every row, read once, so a keystroke over a million
+  /// rows is a string search rather than a million closure calls. Built by
+  /// the first large search, and again when the rows or the visible columns
+  /// change — see [_indexFor].
+  FitGridSearchIndex<T>? _searchIndex;
+
+  /// The rows the last large search ran over.
+  List<T>? _searchedRows;
+
+  /// The last exact filter result: [_filtered] is [_filteredBase] narrowed by
+  /// [_filteredBy].
+  List<T>? _filtered;
+  List<T>? _filteredBase;
+  FitGridRowPredicate<T>? _filteredBy;
+
+  /// Whether every filter set since [_filtered] was computed only narrowed it,
+  /// so the next pass may start from it.
+  bool _canNarrow = false;
+
+  bool _filterRunning = false;
+  int? _filterFailedVersion;
+
+  /// The last view handed out, and the rows it was derived from: what stays on
+  /// screen while a large filter catches up.
+  List<T>? _lastView;
+  List<T>? _lastViewRows;
+
+  /// Filters of at least this many rows run in slices across frames, so typing
+  /// into the search over a million rows never stalls one. Null filters every
+  /// row in one go, on the frame that reads the view.
+  ///
+  /// While a pass runs, [view] keeps what it showed before and [isFiltering]
+  /// is true. When the search only grew since the last finished pass, the next
+  /// one scans that pass's result rather than every row.
+  int? backgroundFilterThreshold = 50000;
+
+  /// Whether a large filter is running, so [view] is showing the previous
+  /// result. Read it after [view]: reading the view is what starts the pass.
+  bool get isFiltering => _filterRunning;
 
   List<FitGridSortKey> _sortKeys = const <FitGridSortKey>[];
   List<Comparator<T>> _comparators = <Comparator<T>>[];
@@ -114,13 +180,15 @@ class FitGridDataState<T> extends ChangeNotifier {
   /// order. Read it after [view]: reading the view is what starts the sort.
   bool get isSorting => _sortRunning;
 
-  /// Completes once [view] reflects the current sort — at once when nothing
-  /// is running in the background. What an export of a just-sorted million
-  /// rows, or a test, waits on.
-  Future<void> whenSorted() {
-    view;
-    if (!_sortRunning) return Future<void>.value();
-    return (_settled ??= Completer<void>()).future;
+  /// Completes once [view] reflects the current sort and filter — at once
+  /// when nothing is running in the background. What an export of a
+  /// just-sorted million rows, or a test, waits on.
+  Future<void> whenSorted() async {
+    while (!_disposed) {
+      view;
+      if (!_sortRunning && !_filterRunning) return;
+      await (_settled ??= Completer<void>()).future;
+    }
   }
 
   /// The active sort, highest priority first. Empty when unsorted.
@@ -148,7 +216,14 @@ class FitGridDataState<T> extends ChangeNotifier {
       _sortKeys.indexWhere((key) => key.columnId == columnId);
 
   /// The rows in display order.
-  List<T> get view => _view ??= _buildView();
+  List<T> get view {
+    final cached = _view;
+    if (cached != null) return cached;
+    final built = _view = _buildView();
+    _lastView = built;
+    _lastViewRows = _rows;
+    return built;
+  }
 
   int get length => view.length;
 
@@ -250,10 +325,33 @@ class FitGridDataState<T> extends ChangeNotifier {
     if (filter == null && _sortKeys.isEmpty) return _rows;
     final sorted = _sortKeys.isEmpty ? _rows : (_sorted ??= _remember());
     if (filter == null) return sorted;
-    return <T>[
-      for (final row in sorted)
+    if (identical(_filteredBy, filter) && identical(_filteredBase, sorted)) {
+      return _filtered!;
+    }
+    final threshold = backgroundFilterThreshold;
+    final lastView = _lastView;
+    // In slices only while there is something of these rows to keep showing;
+    // a view of rows since replaced could show records that no longer exist.
+    if (threshold != null &&
+        sorted.length >= threshold &&
+        _filterFailedVersion != _filterVersion &&
+        lastView != null &&
+        identical(_lastViewRows, _rows)) {
+      _filterInBackground(sorted);
+      return lastView;
+    }
+    final source = _canNarrow && identical(_filteredBase, sorted)
+        ? _filtered!
+        : sorted;
+    final filtered = <T>[
+      for (final row in source)
         if (filter(row)) row,
     ];
+    _filtered = filtered;
+    _filteredBase = sorted;
+    _filteredBy = filter;
+    _canNarrow = true;
+    return filtered;
   }
 
   List<T> _remember() {
@@ -380,13 +478,132 @@ class FitGridDataState<T> extends ChangeNotifier {
       }
       _view = null;
       notifyListeners();
-      if (!_sortRunning) {
-        _settled?.complete();
-        _settled = null;
-      }
+      _wakeWaiters();
     }
 
     unawaited(run());
+  }
+
+  /// Wakes [whenSorted], which checks again whether anything is still running.
+  void _wakeWaiters() {
+    _settled?.complete();
+    _settled = null;
+  }
+
+  /// Every row in sorted order as [_buildView] would use it now, or null when
+  /// the sort has been invalidated since.
+  List<T>? get _currentSorted => _sortKeys.isEmpty ? _rows : _sorted;
+
+  /// Filters [sorted] in slices, yielding to the event loop so the UI keeps
+  /// drawing frames. One pass at a time: a filter set while one runs cancels
+  /// it, and rebuilding the view afterwards starts the pass now wanted.
+  void _filterInBackground(List<T> sorted) {
+    if (_filterRunning) return;
+    _filterRunning = true;
+    final version = _filterVersion;
+    final filter = _filter!;
+    final narrowed = _canNarrow && identical(_filteredBase, sorted);
+    final source = narrowed ? _filtered! : sorted;
+    bool cancelled() =>
+        _disposed ||
+        version != _filterVersion ||
+        !identical(_currentSorted, sorted);
+
+    Future<void> run() async {
+      List<T>? result = <T>[];
+      try {
+        // Never finish inside the read of the view that started this: the
+        // getter caches what it returns, and would cache over the result.
+        await Future<void>.delayed(Duration.zero);
+        if (cancelled()) result = null;
+        var test = filter;
+        final search = _search;
+        if (result != null && search != null) {
+          final index = await _indexFor(search);
+          if (index != null) {
+            final matched = await index.matching(
+              search.needle,
+              cancelled: cancelled,
+            );
+            final rest = _rest;
+            if (matched == null) {
+              result = null;
+            } else if (rest == null) {
+              test = matched.contains;
+            } else {
+              test = (row) => matched.contains(row) && rest(row);
+            }
+          }
+        }
+        final watch = Stopwatch()..start();
+        for (var i = 0; result != null && i < source.length; i++) {
+          final row = source[i];
+          if (test(row)) result.add(row);
+          if ((i & 255) == 0 && watch.elapsed >= _sliceBudget) {
+            await Future<void>.delayed(Duration.zero);
+            if (cancelled()) {
+              result = null;
+              break;
+            }
+            watch.reset();
+          }
+        }
+      } on Object catch (error, stack) {
+        // The UI-thread pass reports it properly the next time the view is
+        // read, and throws where the host can see it.
+        _filterFailedVersion = version;
+        result = null;
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stack,
+            library: 'fitgrid',
+            context: ErrorDescription('while filtering in the background'),
+          ),
+        );
+      }
+      _filterRunning = false;
+      if (_disposed) return;
+      if (result != null && !cancelled()) {
+        _filtered = result;
+        _filteredBase = sorted;
+        _filteredBy = filter;
+        _canNarrow = true;
+      }
+      _view = null;
+      notifyListeners();
+      _wakeWaiters();
+    }
+
+    unawaited(run());
+  }
+
+  static const Duration _sliceBudget = Duration(milliseconds: 6);
+
+  /// A search index for [search] over the rows as they are, built if need
+  /// be, or null when the search is better answered row by row.
+  ///
+  /// Rows replaced on every tick of a live feed would rebuild the index on
+  /// every pass, each costing a full read of the rows. So a stale index is
+  /// rebuilt only once the rows have held still between two searches; until
+  /// then the pass reads the rows directly, as it would without an index.
+  ///
+  /// The build is not cancelled by a newer keystroke — the index is just as
+  /// good for that one — only by new rows or a dispose.
+  Future<FitGridSearchIndex<T>?> _indexFor(FitGridSearch<T> search) async {
+    final rows = _rows;
+    final index = _searchIndex;
+    if (index != null && index.fits(rows, search)) return index;
+    final settled = index == null || identical(_searchedRows, rows);
+    _searchedRows = rows;
+    if (!settled) return null;
+    final built = await FitGridSearchIndex.build<T>(
+      rows,
+      search,
+      cancelled: () => _disposed || !identical(rows, _rows),
+    );
+    if (built != null) _searchIndex = built;
+    return built;
   }
 
   /// Dart's `List.sort` is not stable, and a multi-key sort leans on
@@ -803,8 +1020,31 @@ class FitGridController<T> {
     // re-deriving; the identity check in the setter cannot see that, because a
     // fresh closure is a fresh object every time.
     if (next == null && data.filter == null) return;
-    data.filter = next;
+    final visible = columns.visible;
+    final narrows =
+        data.filter != null &&
+        filter.shapeRevision == _filteredShape &&
+        identical(visible, _filteredColumns) &&
+        filter.queryNarrows(_filteredQuery);
+    _filteredQuery = filter.query;
+    _filteredShape = filter.shapeRevision;
+    _filteredColumns = visible;
+    final search = next == null ? null : filter.buildSearch(visible);
+    data.setFilter(
+      next,
+      narrows: narrows,
+      search: search,
+      rest: search == null
+          ? null
+          : filter.buildPredicate(visible, includeQuery: false),
+    );
   }
+
+  /// What the data state's filter was last built from, so the next one can
+  /// tell whether it only narrows it.
+  String _filteredQuery = '';
+  int _filteredShape = -1;
+  List<FitGridColumn<T>>? _filteredColumns;
 
   /// The view the selection, focus and editor indices currently point into.
   late List<T> _lastView;

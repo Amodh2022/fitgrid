@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../model/column_filter.dart';
 import '../model/fitgrid_column.dart';
+import 'fitgrid_search_index.dart';
 
 /// The active search text and column filters.
 ///
@@ -21,11 +22,30 @@ class FitGridFilterState<T> extends ChangeNotifier {
     notifyListeners();
   }
 
+  int _shapeRevision = 0;
+
+  /// Bumped by every change but the search text. While it holds still, a
+  /// longer search keeps only rows the shorter one kept, so the data state
+  /// can filter the previous result rather than every row.
+  @internal
+  int get shapeRevision => _shapeRevision;
+
+  /// Whether every row the search [query] keeps, a search for [previous]
+  /// kept too, with the column filters unchanged.
+  @internal
+  bool queryNarrows(String previous) {
+    if (previous.isEmpty) return true;
+    return _caseSensitive
+        ? _query.contains(previous)
+        : _query.toLowerCase().contains(previous.toLowerCase());
+  }
+
   bool _caseSensitive = false;
   bool get caseSensitive => _caseSensitive;
   set caseSensitive(bool value) {
     if (_caseSensitive == value) return;
     _caseSensitive = value;
+    _shapeRevision++;
     notifyListeners();
   }
 
@@ -72,6 +92,7 @@ class FitGridFilterState<T> extends ChangeNotifier {
       if (_filters[columnId] == filter) return;
       _filters[columnId] = filter;
     }
+    _shapeRevision++;
     notifyListeners();
   }
 
@@ -81,6 +102,7 @@ class FitGridFilterState<T> extends ChangeNotifier {
     } else {
       _columnFilters[columnId] = predicate;
     }
+    _shapeRevision++;
     notifyListeners();
   }
 
@@ -89,6 +111,7 @@ class FitGridFilterState<T> extends ChangeNotifier {
     if (_columnFilters.isEmpty && _filters.isEmpty) return;
     _columnFilters.clear();
     _filters.clear();
+    _shapeRevision++;
     notifyListeners();
   }
 
@@ -97,6 +120,7 @@ class FitGridFilterState<T> extends ChangeNotifier {
     _query = '';
     _columnFilters.clear();
     _filters.clear();
+    _shapeRevision++;
     notifyListeners();
   }
 
@@ -122,11 +146,31 @@ class FitGridFilterState<T> extends ChangeNotifier {
     return spans;
   }
 
-  bool _matchesQuery(String text) {
-    if (_query.isEmpty) return true;
-    return _caseSensitive
-        ? text.contains(_query)
-        : text.toLowerCase().contains(_query.toLowerCase());
+  /// Whether [text] contains [needle], ignoring case. [needle] is already
+  /// lower case. Compares code units folding ASCII letters, so the common
+  /// case allocates nothing; text with anything beyond ASCII falls back to
+  /// `toLowerCase`, which is what decides a match there.
+  static bool _containsIgnoringCase(String text, String needle) {
+    final n = needle.length;
+    final last = text.length - n;
+    outer:
+    for (var start = 0; start <= last; start++) {
+      for (var k = 0; k < n; k++) {
+        var unit = text.codeUnitAt(start + k);
+        if (unit >= 0x80) return text.toLowerCase().contains(needle);
+        if (unit >= 0x41 && unit <= 0x5A) unit += 0x20;
+        if (unit != needle.codeUnitAt(k)) continue outer;
+      }
+      return true;
+    }
+    // No match in the ASCII prefix scanned; anything non-ASCII after it could
+    // still lower-case into one.
+    for (var i = 0; i < text.length; i++) {
+      if (text.codeUnitAt(i) >= 0x80) {
+        return text.toLowerCase().contains(needle);
+      }
+    }
+    return false;
   }
 
   static FitGridColumn<T>? _columnById<T>(
@@ -142,10 +186,17 @@ class FitGridFilterState<T> extends ChangeNotifier {
   /// Builds the predicate the data state filters with, or null when nothing is
   /// filtered — which is the signal to skip the pass entirely rather than run
   /// a predicate that always says yes over every row.
-  FitGridRowPredicate<T>? buildPredicate(List<FitGridColumn<T>> columns) {
+  ///
+  /// With [includeQuery] false the search is left out: the column filters
+  /// alone, for a data state answering the search from an index.
+  FitGridRowPredicate<T>? buildPredicate(
+    List<FitGridColumn<T>> columns, {
+    bool includeQuery = true,
+  }) {
     if (isEmpty) return null;
+    final query = includeQuery ? _query : '';
     final searchable = <FitGridColumn<T>>[
-      if (_query.isNotEmpty)
+      if (query.isNotEmpty)
         for (final column in columns)
           if (column.searchable) column,
     ];
@@ -168,17 +219,44 @@ class FitGridFilterState<T> extends ChangeNotifier {
       );
     }
     // Everything asked for was on a hidden or removed column: nothing narrows.
-    if (_query.isEmpty && filters.isEmpty) return null;
+    if (query.isEmpty && filters.isEmpty) return null;
+
+    final caseSensitive = _caseSensitive;
+    final needle = caseSensitive ? query : query.toLowerCase();
+    final asciiNeedle = needle.codeUnits.every((unit) => unit < 0x80);
+    bool matches(String text) => caseSensitive
+        ? text.contains(needle)
+        : asciiNeedle
+        ? _containsIgnoringCase(text, needle)
+        : text.toLowerCase().contains(needle);
 
     return (T row) {
       for (final predicate in filters) {
         if (!predicate(row)) return false;
       }
-      if (_query.isEmpty) return true;
+      if (query.isEmpty) return true;
       for (final column in searchable) {
-        if (_matchesQuery(column.value(row))) return true;
+        if (matches(column.value(row))) return true;
       }
       return false;
     };
+  }
+
+  /// The search on its own, for a data state that can answer it from a
+  /// search index, or null when there is none to answer: no search text, or a
+  /// case-sensitive one, which the index — lower case — cannot.
+  @internal
+  FitGridSearch<T>? buildSearch(List<FitGridColumn<T>> columns) {
+    if (_query.isEmpty || _caseSensitive) return null;
+    final needle = _query.toLowerCase();
+    if (!FitGridSearchIndex.canAnswer(needle)) return null;
+    return FitGridSearch<T>(
+      needle: needle,
+      columns: <FitGridColumn<T>>[
+        for (final column in columns)
+          if (column.searchable) column,
+      ],
+      source: columns,
+    );
   }
 }
