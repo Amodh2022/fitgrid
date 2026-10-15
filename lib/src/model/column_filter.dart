@@ -87,7 +87,10 @@ class FitGridColumnFilter {
       case FitGridFilterOperator.isNotEmpty:
         return typed != null || text.trim().isNotEmpty;
       case FitGridFilterOperator.inList:
-        return values.contains(text);
+        if (values.contains(text)) return true;
+        if (typed != null && values.contains(typed.toString())) return true;
+        final lower = text.toLowerCase().trim();
+        return values.any((v) => v.toLowerCase().trim() == lower);
       default:
     }
 
@@ -190,7 +193,40 @@ class FitGridColumnFilter {
       ('=', FitGridFilterOperator.equals),
     ];
 
+    final lower = trimmed.toLowerCase();
+    if (lower.startsWith('in:') || (lower.startsWith('in(') && lower.endsWith(')'))) {
+      final content = lower.startsWith('in:')
+          ? trimmed.substring(3).trim()
+          : trimmed.substring(3, trimmed.length - 1).trim();
+      final items = content
+          .split(RegExp(r'\s*,\s*|\s+or\s+|\|', caseSensitive: false))
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toSet();
+      if (items.isNotEmpty) {
+        return FitGridColumnFilter(
+          operator: FitGridFilterOperator.inList,
+          value: items.join(', '),
+          values: items,
+        );
+      }
+    }
+
     if (kind == FitGridFilterKind.text) {
+      if (trimmed.toLowerCase().contains(RegExp(r'\s+or\s+'))) {
+        final items = trimmed
+            .split(RegExp(r'\s+or\s+', caseSensitive: false))
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toSet();
+        if (items.length > 1) {
+          return FitGridColumnFilter(
+            operator: FitGridFilterOperator.inList,
+            value: items.join(', '),
+            values: items,
+          );
+        }
+      }
       const textPrefixes = <(String, FitGridFilterOperator)>[
         ('!=', FitGridFilterOperator.notEquals),
         ('=', FitGridFilterOperator.equals),
@@ -250,6 +286,9 @@ class FitGridColumnFilter {
   /// the filter dialog can express.
   String? toText(FitGridFilterKind kind) {
     if (kind == FitGridFilterKind.checklist) return null;
+    if (operator == FitGridFilterOperator.inList && values.isNotEmpty) {
+      return 'in: ${values.join(', ')}';
+    }
     final v = value;
     if (v == null) return null;
     final shown = v is DateTime ? _formatDate(v) : '$v';

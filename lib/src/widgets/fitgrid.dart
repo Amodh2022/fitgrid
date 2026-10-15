@@ -1149,16 +1149,23 @@ class _FitGridState<T> extends State<FitGrid<T>> {
             theme: theme,
             child: Scrollbar(
               controller: _verticalController,
-              child: Scrollable(
-                controller: _verticalController,
-                axisDirection: AxisDirection.down,
-                viewportBuilder: (context, verticalOffset) => Scrollable(
-                  controller: _horizontalController,
-                  axisDirection: textDirection == TextDirection.rtl
-                      ? AxisDirection.left
-                      : AxisDirection.right,
-                  viewportBuilder: (context, horizontalOffset) =>
-                      buildSection(verticalOffset, horizontalOffset),
+              notificationPredicate: (notification) =>
+                  notification.metrics.axis == Axis.vertical,
+              child: Scrollbar(
+                controller: _horizontalController,
+                notificationPredicate: (notification) =>
+                    notification.metrics.axis == Axis.horizontal,
+                child: Scrollable(
+                  controller: _verticalController,
+                  axisDirection: AxisDirection.down,
+                  viewportBuilder: (context, verticalOffset) => Scrollable(
+                    controller: _horizontalController,
+                    axisDirection: textDirection == TextDirection.rtl
+                        ? AxisDirection.left
+                        : AxisDirection.right,
+                    viewportBuilder: (context, horizontalOffset) =>
+                        buildSection(verticalOffset, horizontalOffset),
+                  ),
                 ),
               ),
             ),
@@ -2052,6 +2059,11 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     if (row == null) return;
     final globalRow = rows.globalIndex(localRow);
     final column = columns[columnIndex];
+
+    // A tap on the cell whose editor is open belongs to the editor. Taking
+    // focus back to the grid here would make the editor commit on focus loss
+    // and close the moment it opened (the second tap of a double-tap).
+    if (_controller.editing.isEditingCell(globalRow, column.id)) return;
 
     // The disclosure triangle of a tree parent is in the leading inset of the
     // first cell. Hitting it expands rather than selects.

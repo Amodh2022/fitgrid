@@ -177,6 +177,7 @@ class FitGridFilterRow<T> extends StatelessWidget {
       );
     }
     return _FilterField<T>(
+      key: ValueKey<String>('filter_${column.id}'),
       column: column,
       kind: spec.kind,
       theme: theme,
@@ -187,6 +188,7 @@ class FitGridFilterRow<T> extends StatelessWidget {
 
 class _FilterField<T> extends StatefulWidget {
   const _FilterField({
+    super.key,
     required this.column,
     required this.kind,
     required this.theme,
@@ -223,7 +225,8 @@ class _FilterFieldState<T> extends State<_FilterField<T>> {
       widget.filter.addListener(_onFilterChanged);
     }
     if (!identical(oldWidget.filter, widget.filter) ||
-        oldWidget.kind != widget.kind) {
+        oldWidget.kind != widget.kind ||
+        oldWidget.column.id != widget.column.id) {
       _sync();
     }
   }
@@ -270,6 +273,9 @@ class _FilterFieldState<T> extends State<_FilterField<T>> {
   String? _foreignHint(FitGridStrings strings) {
     final current = _current;
     if (current == null || current.toText(widget.kind) != null) return null;
+    if (current.operator == FitGridFilterOperator.inList && current.values.isNotEmpty) {
+      return 'In: ${current.values.join(', ')}';
+    }
     final label = strings.filterOperator(current.operator);
     final value = current.value;
     if (value == null) return label;

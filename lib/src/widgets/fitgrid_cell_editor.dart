@@ -40,6 +40,7 @@ class FitGridCellEditor<T> extends StatefulWidget {
 class _FitGridCellEditorState<T> extends State<FitGridCellEditor<T>> {
   late final TextEditingController _text;
   late final FocusNode _focus;
+  String? _error;
 
   /// Set once the edit is on its way out, so the focus-loss handler does not
   /// fire a second commit as the editor tears itself down. It lifts again only
@@ -56,6 +57,8 @@ class _FitGridCellEditorState<T> extends State<FitGridCellEditor<T>> {
         extentOffset: _text.text.length,
       );
     }
+    _error = widget.editor.validator?.call(widget.session.row, _text.text);
+    _text.addListener(_validate);
     _focus = FocusNode(debugLabel: 'FitGridCellEditor');
     _focus.addListener(_onFocusChanged);
     // Autofocus rather than `autofocus: true`: the editor is created during a
@@ -68,11 +71,21 @@ class _FitGridCellEditorState<T> extends State<FitGridCellEditor<T>> {
 
   @override
   void dispose() {
+    _text.removeListener(_validate);
     _focus
       ..removeListener(_onFocusChanged)
       ..dispose();
     _text.dispose();
     super.dispose();
+  }
+
+  void _validate() {
+    final err = widget.editor.validator?.call(widget.session.row, _text.text);
+    if (err != _error && mounted) {
+      setState(() {
+        _error = err;
+      });
+    }
   }
 
   void _onFocusChanged() {
@@ -92,7 +105,10 @@ class _FitGridCellEditorState<T> extends State<FitGridCellEditor<T>> {
     // or the field would go inert. An accepted one keeps it set: the widget is
     // about to be removed, and the focus loss that follows must not commit a
     // second time.
-    if (!accepted && mounted) _closing = false;
+    if (!accepted && mounted) {
+      _closing = false;
+      _validate();
+    }
   }
 
   void _commitAndAdvance() {
@@ -102,16 +118,62 @@ class _FitGridCellEditorState<T> extends State<FitGridCellEditor<T>> {
       widget.onNext?.call();
     } else if (mounted) {
       _closing = false;
+      _validate();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final custom = widget.editor.builder;
-    if (custom != null) return custom(context, widget.session);
-
     final theme = widget.theme;
     final padding = theme.effectiveCellPadding;
+    final custom = widget.editor.builder;
+
+    final Widget editorContent = custom != null
+        ? custom(context, widget.session)
+        : Padding(
+            padding: EdgeInsets.symmetric(horizontal: padding.left - 2),
+            child: Center(
+              child: TextField(
+                controller: _text,
+                focusNode: _focus,
+                style: theme.cellTextStyle,
+                textAlign: widget.editor.textAlign ?? widget.alignment,
+                keyboardType: widget.editor.keyboardType,
+                inputFormatters: widget.editor.inputFormatters,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
+                onSubmitted: (_) => _commit(),
+              ),
+            ),
+          );
+
+    final editorBox = DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.rowBackground,
+        border: Border.all(
+          color: _error != null ? Colors.redAccent : theme.focusOutline,
+          width: 2,
+        ),
+      ),
+      child: editorContent,
+    );
+
+    final content = _error != null
+        ? Tooltip(
+            message: _error!,
+            preferBelow: false,
+            waitDuration: const Duration(milliseconds: 200),
+            decoration: BoxDecoration(
+              color: Colors.red.shade900,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            textStyle: const TextStyle(color: Colors.white, fontSize: 11),
+            child: editorBox,
+          )
+        : editorBox;
 
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
@@ -142,31 +204,7 @@ class _FitGridCellEditorState<T> extends State<FitGridCellEditor<T>> {
             },
           ),
         },
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: theme.rowBackground,
-            border: Border.all(color: theme.focusOutline, width: 2),
-          ),
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: padding.left - 2),
-            child: Center(
-              child: TextField(
-                controller: _text,
-                focusNode: _focus,
-                style: theme.cellTextStyle,
-                textAlign: widget.editor.textAlign ?? widget.alignment,
-                keyboardType: widget.editor.keyboardType,
-                inputFormatters: widget.editor.inputFormatters,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
-                ),
-                onSubmitted: (_) => _commit(),
-              ),
-            ),
-          ),
-        ),
+        child: content,
       ),
     );
   }
