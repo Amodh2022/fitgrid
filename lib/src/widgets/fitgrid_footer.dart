@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 import '../model/enums.dart';
 import '../model/fitgrid_column.dart';
@@ -157,21 +157,24 @@ class FitGridFooter<T> extends StatelessWidget {
           // is too narrow. Two Flexibles would split the room in half and cut
           // a long total off while space sat unused beside a short label.
           Flexible(
-            child: Text.rich(
-              TextSpan(
-                children: [
-                  if (label != null)
-                    TextSpan(
-                      text: '$label  ',
-                      style: theme.headerTextStyle.copyWith(
-                        color: theme.placeholderForeground,
+            child: Tooltip(
+              message: '${column.label}: ${label ?? ""}$value',
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    if (label != null)
+                      TextSpan(
+                        text: '$label  ',
+                        style: theme.headerTextStyle.copyWith(
+                          color: theme.placeholderForeground,
+                        ),
                       ),
-                    ),
-                  TextSpan(text: value, style: theme.headerTextStyle),
-                ],
+                    TextSpan(text: value, style: theme.headerTextStyle),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],

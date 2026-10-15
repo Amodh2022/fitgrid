@@ -784,7 +784,6 @@ class _HeaderCell<T> extends StatelessWidget {
             children: [
               Draggable<String>(
                 data: column.id,
-                axis: Axis.horizontal,
                 feedback: _DragFeedback(
                   label: column.label,
                   width: width,
