@@ -338,4 +338,24 @@ void main() {
     expect(find.byType(TextField), findsNothing);
     expect(fitGridSection().editingCell, (-1, -1));
   });
+
+  testWidgets('tapping an open cell editor keeps the editor open', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host(grid()));
+    final target = _cellCentre(tester, 0, 0);
+
+    await tester.tapAt(target);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tapAt(target);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TextField), findsOneWidget);
+
+    // Tap the editing cell again
+    await tester.tapAt(target);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TextField), findsOneWidget);
+  });
 }
