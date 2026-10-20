@@ -2052,6 +2052,8 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     if (row == null) return;
     final globalRow = rows.globalIndex(localRow);
     final column = columns[columnIndex];
+    final isEditingThis =
+        _controller.editing.isEditingCell(globalRow, column.id);
 
     // The disclosure triangle of a tree parent is in the leading inset of the
     // first cell. Hitting it expands rather than selects.
@@ -2066,7 +2068,10 @@ class _FitGridState<T> extends State<FitGrid<T>> {
       }
     }
 
-    if (widget.keyboardNavigation) {
+    // A tap on the cell whose editor is open belongs to the editor. Taking
+    // focus back to the grid here would make the editor commit on focus loss
+    // and close the moment it opened (the second tap of a double-tap).
+    if (widget.keyboardNavigation && !isEditingThis) {
       _focusNode.requestFocus();
       _controller.focus.moveTo(globalRow, column.id);
     }
@@ -2108,7 +2113,7 @@ class _FitGridState<T> extends State<FitGrid<T>> {
     // should not also open an editor or report a cell tap.
     if (column.id == FitGrid.selectionColumnId) return;
 
-    if (openEditor) _beginEdit(globalPosition, columns, rows);
+    if (openEditor && !isEditingThis) _beginEdit(globalPosition, columns, rows);
     widget.onRowTap?.call(row, globalRow);
     widget.onCellTap?.call(row, globalRow, column.id);
   }

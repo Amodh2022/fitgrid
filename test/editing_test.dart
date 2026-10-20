@@ -55,6 +55,8 @@ void main() {
     FitGridCellValidator<_Employee>? validator,
     bool commitOnFocusLoss = true,
     bool paginated = false,
+    void Function(_Employee row, int rowIndex)? onRowTap,
+    void Function(_Employee row, int rowIndex, String columnId)? onCellTap,
   }) {
     harness.controller = FitGridController<_Employee>(
       rows: harness.rows,
@@ -105,6 +107,8 @@ void main() {
         paginated: paginated,
         pageSize: 10,
         stretchColumnsToFill: false,
+        onRowTap: onRowTap,
+        onCellTap: onCellTap,
       ),
     );
   }
@@ -337,5 +341,47 @@ void main() {
 
     expect(find.byType(TextField), findsNothing);
     expect(fitGridSection().editingCell, (-1, -1));
+  });
+
+  testWidgets('tapping an open cell editor keeps the editor open', (
+    tester,
+  ) async {
+    await tester.pumpWidget(grid());
+    final target = _cellCentre(tester, 1, 0);
+
+    await tester.tapAt(target);
+    await tester.pump(kDoubleTapMinTime);
+    await tester.tapAt(target);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TextField), findsOneWidget);
+
+    // Tap the editing cell again
+    await tester.tapAt(target);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TextField), findsOneWidget);
+  });
+
+  testWidgets('tapping cell still reports onRowTap and onCellTap', (
+    tester,
+  ) async {
+    var rowTaps = 0;
+    var cellTaps = 0;
+    await tester.pumpWidget(
+      grid(
+        trigger: FitGridEditTrigger.singleTap,
+        onRowTap: (row, index) => rowTaps++,
+        onCellTap: (row, index, col) => cellTaps++,
+      ),
+    );
+
+    await tester.tapAt(_cellCentre(tester, 1, 0));
+    await tester.pump(kDoubleTapTimeout);
+    await tester.pumpAndSettle();
+
+    expect(rowTaps, 1);
+    expect(cellTaps, 1);
+    expect(find.byType(TextField), findsOneWidget);
   });
 }

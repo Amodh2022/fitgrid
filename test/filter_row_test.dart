@@ -301,6 +301,27 @@ void main() {
       );
     });
 
+    testWidgets('fields keep their text when columns are reordered', (
+      tester,
+    ) async {
+      final controller = FitGridController<Employee>(
+        rows: makeRows(20),
+        columns: filterColumns(),
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        host(FitGrid<Employee>(controller: controller, showFilterRow: true)),
+      );
+      await tester.enterText(_field('Name'), 'Alice');
+      await tester.pump();
+      controller.columns.move(0, 2);
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(_field('Name')).controller!.text,
+        'Alice',
+      );
+    });
+
     testWidgets('sits between the header and the body', (tester) async {
       await tester.pumpWidget(
         host(
